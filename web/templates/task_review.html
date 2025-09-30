@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Task - {{ task.task_id[:8] }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        
+        .review-container {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 1rem;
+            padding: 1rem;
+            height: calc(100vh - 80px);
+        }
+        
+        .pdf-viewer {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 1rem;
+            overflow: auto;
+        }
+        
+        .pdf-page {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        .pdf-page img {
+            max-width: 100%;
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+        }
+        
+        .fields-panel {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 1rem;
+            overflow: auto;
+        }
+        
+        .task-info {
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .task-info h3 {
+            margin: 0 0 0.5rem 0;
+            color: #2d3748;
+        }
+        
+        .task-meta {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+        }
+        
+        .validation-errors {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .validation-errors h4 {
+            margin: 0 0 0.5rem 0;
+            color: #dc2626;
+        }
+        
+        .error-item {
+            font-size: 0.875rem;
+            color: #b91c1c;
+            margin-bottom: 0.25rem;
+        }
+        
+        .field-item {
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: #fafbfc;
+        }
+        
+        .field-item.has-violations {
+            border-color: #f87171;
+            background: #fef2f2;
+        }
+        
+        .field-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .field-name {
+            font-weight: 600;
+            color: #2d3748;
+        }
+        
+        .confidence-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .confidence-high {
+            background: #d1fae5;
+            color: #047857;
+        }
+        
+        .confidence-medium {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .confidence-low {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .field-value {
+            margin-bottom: 0.5rem;
+        }
+        
+        .field-value input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .field-meta {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-bottom: 0.5rem;
+        }
+        
+        .rule-violations {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 4px;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .violation-item {
+            font-size: 0.75rem;
+            color: #dc2626;
+            margin-bottom: 0.25rem;
+        }
+        
+        .suggestions {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 4px;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .suggestion-item {
+            font-size: 0.75rem;
+            color: #059669;
+            cursor: pointer;
+            margin-bottom: 0.25rem;
+        }
+        
+        .suggestion-item:hover {
+            text-decoration: underline;
+        }
+        
+        .correction-reason {
+            margin-top: 0.5rem;
+        }
+        
+        .correction-reason textarea {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            rows: 2;
+        }
+        
+        .completion-section {
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .completion-section h4 {
+            margin: 0 0 1rem 0;
+            color: #2d3748;
+        }
+        
+        .notes-textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            rows: 3;
+            margin-bottom: 1rem;
+        }
+        
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+        
+        .btn:hover {
+            background: #2563eb;
+        }
+        
+        .btn-success {
+            background: #059669;
+        }
+        
+        .btn-success:hover {
+            background: #047857;
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        
+        .btn-wide {
+            width: 100%;
+            text-align: center;
+        }
+        
+        .status-indicator {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status-assigned {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .status-in_progress {
+            background: #ecfdf5;
+            color: #047857;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Review Task: {{ task.document_id }}</h1>
+        <div class="header-actions">
+            <span class="status-indicator status-{{ task.status }}">{{ task.status }}</span>
+            <a href="/" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </div>
+
+    <div class="review-container">
+        <div class="pdf-viewer">
+            <h3>📄 Document Viewer</h3>
+            {% if task.pdf_pages %}
+                {% for page in task.pdf_pages %}
+                <div class="pdf-page">
+                    <img src="data:image/png;base64,{{ page }}" alt="Document Page {{ loop.index }}" />
+                    <p style="color: #6b7280; font-size: 0.875rem;">Page {{ loop.index }} of {{ task.pdf_pages | length }}</p>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="text-align: center; color: #6b7280; padding: 2rem;">
+                    <p>📄 PDF preview not available</p>
+                    <p style="font-size: 0.875rem;">Document: {{ task.pdf_file_path or 'No file path' }}</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="fields-panel">
+            <div class="task-info">
+                <h3>Task Information</h3>
+                <div class="task-meta"><strong>Task ID:</strong> {{ task.task_id }}</div>
+                <div class="task-meta"><strong>Document Type:</strong> {{ task.document_type }}</div>
+                <div class="task-meta"><strong>Created:</strong> {{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                {% if task.assigned_to %}
+                <div class="task-meta"><strong>Assigned to:</strong> {{ task.assigned_to }}</div>
+                {% endif %}
+                {% if task.sla_deadline %}
+                <div class="task-meta"><strong>SLA Deadline:</strong> {{ task.sla_deadline.strftime('%Y-%m-%d %H:%M') }}</div>
+                {% endif %}
+            </div>
+
+            {% if task.validation_errors %}
+            <div class="validation-errors">
+                <h4>⚠️ Validation Errors</h4>
+                {% for error in task.validation_errors %}
+                <div class="error-item">• {{ error }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <h3>🏷️ Extracted Fields</h3>
+            <form id="reviewForm">
+                {% for field in task.extracted_fields %}
+                <div class="field-item {% if field.rule_violations %}has-violations{% endif %}">
+                    <div class="field-header">
+                        <span class="field-name">{{ field.field_name }}</span>
+                        <span class="confidence-badge 
+                            {% if field.confidence >= 0.9 %}confidence-high
+                            {% elif field.confidence >= 0.7 %}confidence-medium
+                            {% else %}confidence-low{% endif %}">
+                            {{ (field.confidence * 100) | round(1) }}%
+                        </span>
+                    </div>
+                    
+                    <div class="field-value">
+                        <input type="text" 
+                               name="field_{{ field.field_name }}" 
+                               value="{{ field.value }}" 
+                               data-original="{{ field.value }}"
+                               placeholder="Enter corrected value...">
+                    </div>
+                    
+                    <div class="field-meta">
+                        Method: {{ field.extraction_method }}
+                        {% if field.bounding_box %}
+                        | Location: Page {{ field.bounding_box.page_number + 1 }}, 
+                        ({{ field.bounding_box.x | round }}, {{ field.bounding_box.y | round }})
+                        {% endif %}
+                    </div>
+                    
+                    {% if field.rule_violations %}
+                    <div class="rule-violations">
+                        <strong>Rule Violations:</strong>
+                        {% for violation in field.rule_violations %}
+                        <div class="violation-item">• {{ violation }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if field.suggested_corrections %}
+                    <div class="suggestions">
+                        <strong>Suggestions:</strong>
+                        {% for suggestion in field.suggested_corrections %}
+                        <div class="suggestion-item" onclick="applySuggestion('field_{{ field.field_name }}', '{{ suggestion }}')">
+                            → {{ suggestion }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="correction-reason">
+                        <textarea name="reason_{{ field.field_name }}" 
+                                  placeholder="Reason for correction (optional)..."></textarea>
+                    </div>
+                </div>
+                {% endfor %}
+            </form>
+
+            <div class="completion-section">
+                <h4>Complete Review</h4>
+                <textarea id="completionNotes" class="notes-textarea" placeholder="Additional notes (optional)..."></textarea>
+                
+                {% if task.status == 'pending' %}
+                    <button onclick="recordFirstTouch()" class="btn btn-wide" style="margin-bottom: 0.5rem;">
+                        Start Review
+                    </button>
+                {% endif %}
+                
+                <button onclick="completeReview()" class="btn btn-success btn-wide">
+                    Complete Review
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const taskId = '{{ task.task_id }}';
+        const reviewerId = '{{ task.assigned_to or "reviewer1" }}';
+
+        function applySuggestion(fieldName, suggestion) {
+            const input = document.querySelector(`input[name="${fieldName}"]`);
+            if (input) {
+                input.value = suggestion;
+                input.style.background = '#f0fdf4';
+            }
+        }
+
+        async function recordFirstTouch() {
+            try {
+                const formData = new FormData();
+                formData.append('reviewer_id', reviewerId);
+                
+                const response = await fetch(`/api/tasks/${taskId}/first-touch`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('Review started - first touch recorded');
+                    location.reload();
+                }
+            } catch (error) {
+                alert('Failed to record first touch');
+                console.error(error);
+            }
+        }
+
+        async function completeReview() {
+            if (!confirm('Are you sure you want to complete this review?')) {
+                return;
+            }
+
+            try {
+                // Collect field corrections
+                const corrections = {};
+                const form = document.getElementById('reviewForm');
+                const inputs = form.querySelectorAll('input[name^="field_"]');
+                
+                inputs.forEach(input => {
+                    const fieldName = input.name.replace('field_', '');
+                    const originalValue = input.dataset.original;
+                    const correctedValue = input.value;
+                    const reasonTextarea = form.querySelector(`textarea[name="reason_${fieldName}"]`);
+                    const reason = reasonTextarea ? reasonTextarea.value : '';
+                    
+                    if (originalValue !== correctedValue) {
+                        corrections[fieldName] = {
+                            corrected_value: correctedValue,
+                            reason: reason || 'Manual correction',
+                            confidence: 5
+                        };
+                    }
+                });
+
+                const formData = new FormData();
+                formData.append('reviewer_id', reviewerId);
+                formData.append('field_corrections', JSON.stringify(corrections));
+                formData.append('notes', document.getElementById('completionNotes').value);
+                
+                const response = await fetch(`/api/tasks/${taskId}/complete`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('Review completed successfully!');
+                    window.location.href = '/';
+                } else {
+                    alert('Failed to complete review');
+                }
+            } catch (error) {
+                alert('Failed to complete review');
+                console.error(error);
+            }
+        }
+
+        // Highlight changed fields
+        document.addEventListener('DOMContentLoaded', function() {
+            const inputs = document.querySelectorAll('input[name^="field_"]');
+            inputs.forEach(input => {
+                input.addEventListener('input', function() {
+                    if (this.value !== this.dataset.original) {
+                        this.style.background = '#fef3c7';
+                        this.style.borderColor = '#f59e0b';
+                    } else {
+                        this.style.background = '';
+                        this.style.borderColor = '#d1d5db';
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

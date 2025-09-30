@@ -1,0 +1,175 @@
+{
+  "template_type": "invoice",
+  "version": "1.0",
+  "required_confidence": 0.8,
+  "fields": [
+    {
+      "name": "invoice_number",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "invoice #",
+        "inv #",
+        "invoice id",
+        "bill number"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "alphanumeric"
+      ],
+      "confidence_threshold": 0.9,
+      "description": "Unique invoice identifier"
+    },
+    {
+      "name": "vendor_name",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "from",
+        "bill from",
+        "seller",
+        "company"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "min_length:2"
+      ],
+      "confidence_threshold": 0.8
+    },
+    {
+      "name": "invoice_date",
+      "field_type": "date",
+      "required": true,
+      "synonyms": [
+        "date",
+        "bill date",
+        "invoice dt"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "past_date"
+      ],
+      "confidence_threshold": 0.8
+    },
+    {
+      "name": "due_date",
+      "field_type": "date",
+      "required": false,
+      "synonyms": [
+        "payment due",
+        "due",
+        "pay by"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "future_date_from_invoice"
+      ]
+    },
+    {
+      "name": "total_amount",
+      "field_type": "currency",
+      "required": true,
+      "synonyms": [
+        "total",
+        "amount due",
+        "balance",
+        "grand total"
+      ],
+      "validation_rules": [
+        "positive_amount",
+        "currency_format"
+      ],
+      "confidence_threshold": 0.9
+    },
+    {
+      "name": "subtotal",
+      "field_type": "currency",
+      "required": false,
+      "synonyms": [
+        "sub total",
+        "net amount",
+        "before tax"
+      ],
+      "validation_rules": [
+        "positive_amount"
+      ]
+    },
+    {
+      "name": "tax_amount",
+      "field_type": "currency",
+      "required": false,
+      "synonyms": [
+        "tax",
+        "vat",
+        "sales tax",
+        "gst"
+      ],
+      "validation_rules": [
+        "non_negative_amount"
+      ]
+    },
+    {
+      "name": "customer_name",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "bill to",
+        "customer",
+        "client",
+        "buyer"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "name": "line_items",
+      "header_required": true,
+      "min_rows": 1,
+      "sum_columns": [
+        "amount"
+      ],
+      "columns": [
+        {
+          "name": "description",
+          "field_type": "text",
+          "required": true,
+          "validation_rules": [
+            "not_empty"
+          ]
+        },
+        {
+          "name": "quantity",
+          "field_type": "number",
+          "required": false,
+          "validation_rules": [
+            "positive_number"
+          ]
+        },
+        {
+          "name": "unit_price",
+          "field_type": "currency",
+          "required": false,
+          "validation_rules": [
+            "positive_amount"
+          ]
+        },
+        {
+          "name": "amount",
+          "field_type": "currency",
+          "required": true,
+          "validation_rules": [
+            "positive_amount"
+          ]
+        }
+      ]
+    }
+  ],
+  "business_rules": [
+    "total_equals_subtotal_plus_tax",
+    "due_date_after_invoice_date",
+    "line_items_sum_to_subtotal"
+  ]
+}

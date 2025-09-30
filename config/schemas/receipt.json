@@ -1,0 +1,88 @@
+{
+  "template_type": "receipt",
+  "version": "1.0",
+  "required_confidence": 0.7,
+  "fields": [
+    {
+      "name": "merchant_name",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "store",
+        "retailer",
+        "shop"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "confidence_threshold": 0.8
+    },
+    {
+      "name": "transaction_date",
+      "field_type": "date",
+      "required": true,
+      "synonyms": [
+        "date",
+        "purchase date",
+        "trans date"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "past_date"
+      ],
+      "confidence_threshold": 0.8
+    },
+    {
+      "name": "total_amount",
+      "field_type": "currency",
+      "required": true,
+      "synonyms": [
+        "total",
+        "amount",
+        "grand total"
+      ],
+      "validation_rules": [
+        "positive_amount"
+      ],
+      "confidence_threshold": 0.9
+    },
+    {
+      "name": "payment_method",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "payment",
+        "paid by",
+        "method"
+      ],
+      "validation_rules": [
+        "valid_payment_method"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "name": "items",
+      "header_required": false,
+      "min_rows": 1,
+      "columns": [
+        {
+          "name": "item_name",
+          "field_type": "text",
+          "required": true
+        },
+        {
+          "name": "price",
+          "field_type": "currency",
+          "required": true,
+          "validation_rules": [
+            "positive_amount"
+          ]
+        }
+      ]
+    }
+  ],
+  "business_rules": [
+    "items_sum_to_total"
+  ]
+}

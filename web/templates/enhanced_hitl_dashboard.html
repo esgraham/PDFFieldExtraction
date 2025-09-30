@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced HITL Review System</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 0.5rem 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid #e1e5e9;
+        }
+        
+        .card h2 {
+            margin: 0 0 1rem 0;
+            color: #2d3748;
+            font-size: 1.25rem;
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+        
+        .metric-label {
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .metric-value {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        
+        .metric-value.danger {
+            color: #dc2626;
+        }
+        
+        .metric-value.warning {
+            color: #f59e0b;
+        }
+        
+        .metric-value.success {
+            color: #059669;
+        }
+        
+        .tasks-section {
+            background: white;
+            border-radius: 10px;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .task-item {
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: #fafbfc;
+        }
+        
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .task-id {
+            font-family: monospace;
+            background: #e2e8f0;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        
+        .task-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .task-status.pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .task-status.assigned {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .task-status.in_progress {
+            background: #ecfdf5;
+            color: #047857;
+        }
+        
+        .task-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .task-detail {
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+        
+        .task-detail strong {
+            color: #2d3748;
+        }
+        
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+        
+        .btn:hover {
+            background: #2563eb;
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        
+        .btn-success {
+            background: #059669;
+        }
+        
+        .btn-success:hover {
+            background: #047857;
+        }
+        
+        .actions {
+            text-align: center;
+            margin-top: 2rem;
+        }
+        
+        .reviewer-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .reviewer-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        
+        .reviewer-name {
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+        
+        .reviewer-workload {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+        
+        .refresh-btn {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #059669;
+            color: white;
+            border: none;
+            padding: 1rem;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: all 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            background: #047857;
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Enhanced HITL Review System</h1>
+        <p>Human-in-the-loop document processing with PDF viewer, SLA tracking, and training data collection</p>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="card">
+            <h2>📊 Queue Status</h2>
+            <div class="metric">
+                <span class="metric-label">Total Active Tasks</span>
+                <span class="metric-value">{{ queue_status.queue_summary.total_active_tasks }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Pending Tasks</span>
+                <span class="metric-value warning">{{ queue_status.queue_summary.pending_tasks }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">In Progress</span>
+                <span class="metric-value success">{{ queue_status.queue_summary.in_progress_tasks }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">SLA Violations</span>
+                <span class="metric-value danger">{{ queue_status.queue_summary.sla_violations }}</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🎯 Training Data</h2>
+            <div class="metric">
+                <span class="metric-label">Training Samples</span>
+                <span class="metric-value success">{{ training_summary.total_training_samples }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Field Corrections</span>
+                <span class="metric-value">{{ training_summary.total_field_corrections }}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Last Updated</span>
+                <span class="metric-value" style="font-size: 0.8rem;">{{ training_summary.last_updated[:19] }}</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>👥 Reviewer Stats</h2>
+            <div class="reviewer-stats">
+                {% for reviewer_id, reviewer in queue_status.reviewer_stats.items() %}
+                <div class="reviewer-card">
+                    <div class="reviewer-name">{{ reviewer.name }}</div>
+                    <div class="reviewer-workload">
+                        <span>Current: {{ reviewer.current_workload }}</span>
+                        <span>Completed: {{ reviewer.completed_tasks }}</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem;">
+                        {{ reviewer.specializations | join(", ") }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% if active_tasks %}
+    <div class="tasks-section">
+        <h2>📋 Active Review Tasks</h2>
+        {% for task in active_tasks %}
+        <div class="task-item">
+            <div class="task-header">
+                <span class="task-id">{{ task.task_id[:8] }}...</span>
+                <span class="task-status {{ task.status }}">{{ task.status }}</span>
+            </div>
+            <div class="task-details">
+                <div class="task-detail">
+                    <strong>Document:</strong> {{ task.document_id }}
+                </div>
+                <div class="task-detail">
+                    <strong>Type:</strong> {{ task.document_type }}
+                </div>
+                <div class="task-detail">
+                    <strong>Fields:</strong> {{ task.extracted_fields | length }}
+                </div>
+                <div class="task-detail">
+                    <strong>Errors:</strong> {{ task.validation_errors | length }}
+                </div>
+                {% if task.assigned_to %}
+                <div class="task-detail">
+                    <strong>Assigned to:</strong> {{ task.assigned_to }}
+                </div>
+                {% endif %}
+                {% if task.sla_deadline %}
+                <div class="task-detail">
+                    <strong>SLA Deadline:</strong> {{ task.sla_deadline.strftime('%H:%M') }}
+                </div>
+                {% endif %}
+            </div>
+            <div style="margin-top: 1rem;">
+                <a href="/review/{{ task.task_id }}" class="btn">Review Task</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="actions">
+        <button onclick="createSampleTask()" class="btn btn-success">Create Sample Task</button>
+        <button onclick="refreshDashboard()" class="btn btn-secondary">Refresh Dashboard</button>
+    </div>
+
+    <button onclick="refreshDashboard()" class="refresh-btn" title="Refresh Dashboard">
+        🔄
+    </button>
+
+    <script>
+        async function createSampleTask() {
+            try {
+                const response = await fetch('/api/create-sample-task', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                if (result.task_id) {
+                    alert(`Sample task created: ${result.task_id}`);
+                    refreshDashboard();
+                }
+            } catch (error) {
+                alert('Failed to create sample task');
+                console.error(error);
+            }
+        }
+
+        function refreshDashboard() {
+            window.location.reload();
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(refreshDashboard, 30000);
+    </script>
+</body>
+</html>

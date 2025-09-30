@@ -1,0 +1,24 @@
+{
+  "name": "invoice_sample.json",
+  "type": "invoice",
+  "content": {
+    "company": "ABC Corp",
+    "invoice_number": "INV-2024-001",
+    "date": "2024-03-15",
+    "amount": "$1,250.00",
+    "items": [
+      {
+        "description": "Software License",
+        "qty": 1,
+        "price": 1000.0
+      },
+      {
+        "description": "Support Services",
+        "qty": 1,
+        "price": 250.0
+      }
+    ],
+    "has_handwritten_signature": true,
+    "contains_tables": true
+  }
+}

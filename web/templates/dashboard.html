@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #f5f7fa;
+            color: #2d3748;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .nav-tabs {
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .nav-tabs ul {
+            list-style: none;
+            display: flex;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+        
+        .nav-tabs li {
+            margin-right: 2rem;
+        }
+        
+        .nav-tabs a {
+            display: block;
+            padding: 1rem 0;
+            text-decoration: none;
+            color: #64748b;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-tabs a:hover,
+        .nav-tabs a.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        
+        .main-content {
+            padding: 2rem 0;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+        
+        .metric-card h3 {
+            font-size: 1.1rem;
+            color: #64748b;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 0.5rem;
+        }
+        
+        .metric-change {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .metric-change.positive {
+            color: #10b981;
+        }
+        
+        .metric-change.negative {
+            color: #ef4444;
+        }
+        
+        .metric-change.neutral {
+            color: #64748b;
+        }
+        
+        .summary-section {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 2rem;
+        }
+        
+        .summary-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: #1a202c;
+        }
+        
+        .summary-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .control-group label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #64748b;
+        }
+        
+        select, button {
+            padding: 0.75rem 1rem;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        select:focus, button:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            font-weight: 500;
+        }
+        
+        button:hover {
+            background: #5a67d8;
+        }
+        
+        .summary-content {
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 2rem;
+            border: 1px solid #e2e8f0;
+            min-height: 300px;
+        }
+        
+        .summary-content pre {
+            white-space: pre-wrap;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: #374151;
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+            color: #64748b;
+        }
+        
+        .loading::after {
+            content: '';
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e2e8f0;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        
+        .status-indicator.good {
+            background: #10b981;
+        }
+        
+        .status-indicator.warning {
+            background: #f59e0b;
+        }
+        
+        .status-indicator.critical {
+            background: #ef4444;
+        }
+        
+        .realtime-metrics {
+            position: fixed;
+            top: 100px;
+            right: 20px;
+            background: white;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
+            min-width: 200px;
+            z-index: 1000;
+        }
+        
+        .realtime-metrics h4 {
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .realtime-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        
+        .realtime-metric:last-child {
+            border-bottom: none;
+        }
+        
+        .realtime-metric span:first-child {
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        
+        .realtime-metric span:last-child {
+            font-weight: 600;
+            color: #1a202c;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 1rem;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            .nav-tabs ul {
+                padding: 0 1rem;
+            }
+            
+            .nav-tabs li {
+                margin-right: 1rem;
+            }
+            
+            .summary-controls {
+                flex-direction: column;
+            }
+            
+            .realtime-metrics {
+                position: static;
+                margin-bottom: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <h1>{{ title }}</h1>
+            <p>Real-time analytics and KPI monitoring for PDF field extraction pipeline</p>
+            <p><small>Last updated: {{ current_time }}</small></p>
+        </div>
+    </header>
+
+    <nav class="nav-tabs">
+        <ul>
+            <li><a href="/" class="active">Overview</a></li>
+            <li><a href="/dashboard/executive">Executive</a></li>
+            <li><a href="/dashboard/operational">Operational</a></li>
+            <li><a href="/dashboard/technical">Technical</a></li>
+        </ul>
+    </nav>
+
+    <main class="main-content">
+        <div class="container">
+            <!-- Real-time Metrics Sidebar -->
+            <div class="realtime-metrics" id="realtimeMetrics">
+                <h4>Live Metrics</h4>
+                <div id="realtimeContent">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="dashboard-grid" id="kpiCards">
+                <div class="loading">Loading KPI metrics...</div>
+            </div>
+
+            <!-- Summary Section -->
+            <section class="summary-section">
+                <h2>Executive Summary</h2>
+                
+                <div class="summary-controls">
+                    <div class="control-group">
+                        <label for="summaryType">Summary Type</label>
+                        <select id="summaryType">
+                            <option value="executive">Executive</option>
+                            <option value="operational">Operational</option>
+                            <option value="technical">Technical</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="timePeriod">Time Period</label>
+                        <select id="timePeriod">
+                            <option value="1">Last 24 hours</option>
+                            <option value="7" selected>Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="audience">Audience</label>
+                        <select id="audience">
+                            <option value="internal" selected>Internal</option>
+                            <option value="restricted">Restricted</option>
+                            <option value="public">Public</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>&nbsp;</label>
+                        <button onclick="generateSummary()">Generate Summary</button>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>&nbsp;</label>
+                        <button onclick="generateLLMSummary()">AI Enhanced Summary</button>
+                    </div>
+                </div>
+                
+                <div class="summary-content" id="summaryContent">
+                    <div class="loading">Click "Generate Summary" to create a report...</div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        // Dashboard functionality
+        let realtimeInterval;
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadKPICards();
+            loadRealtimeMetrics();
+            
+            // Update real-time metrics every 30 seconds
+            realtimeInterval = setInterval(loadRealtimeMetrics, 30000);
+        });
+        
+        // Load KPI cards
+        async function loadKPICards() {
+            try {
+                const response = await fetch('/api/kpis?days=7&template=executive');
+                const data = await response.json();
+                
+                const dashboard = data.dashboard;
+                
+                const kpiHtml = `
+                    <div class="metric-card">
+                        <h3>Overall Accuracy</h3>
+                        <div class="metric-value">${(dashboard.overall_accuracy * 100).toFixed(1)}%</div>
+                        <div class="metric-change ${getChangeClass(dashboard.overall_accuracy, 0.9)}">
+                            <span class="status-indicator ${getStatusClass(dashboard.overall_accuracy, 0.9, 0.8)}"></span>
+                            Target: 90%+
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <h3>STP Rate</h3>
+                        <div class="metric-value">${(dashboard.stp_rate * 100).toFixed(1)}%</div>
+                        <div class="metric-change ${getChangeClass(dashboard.stp_rate, 0.8)}">
+                            <span class="status-indicator ${getStatusClass(dashboard.stp_rate, 0.8, 0.7)}"></span>
+                            Target: 80%+
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <h3>Throughput</h3>
+                        <div class="metric-value">${dashboard.throughput_docs_per_hour.toFixed(0)}</div>
+                        <div class="metric-change neutral">
+                            <span class="status-indicator ${getStatusClass(dashboard.throughput_docs_per_hour, 100, 50)}"></span>
+                            docs/hour
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <h3>Cost per Document</h3>
+                        <div class="metric-value">$${dashboard.cost_per_document.toFixed(3)}</div>
+                        <div class="metric-change neutral">
+                            <span class="status-indicator good"></span>
+                            Average processing cost
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <h3>P95 Latency</h3>
+                        <div class="metric-value">${dashboard.latency_p95.toFixed(2)}s</div>
+                        <div class="metric-change ${getChangeClass(10 - dashboard.latency_p95, 0)}">
+                            <span class="status-indicator ${getStatusClass(10 - dashboard.latency_p95, 7, 0)}"></span>
+                            Target: <10s
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <h3>Exception Rate</h3>
+                        <div class="metric-value">${(dashboard.exception_rate * 100).toFixed(1)}%</div>
+                        <div class="metric-change ${getChangeClass(1 - dashboard.exception_rate, 0.9)}">
+                            <span class="status-indicator ${getStatusClass(1 - dashboard.exception_rate, 0.9, 0.8)}"></span>
+                            ${dashboard.top_exceptions.length > 0 ? dashboard.top_exceptions[0].type : 'No exceptions'}
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('kpiCards').innerHTML = kpiHtml;
+                
+            } catch (error) {
+                console.error('Error loading KPI cards:', error);
+                document.getElementById('kpiCards').innerHTML = '<div class="loading">Error loading KPI data</div>';
+            }
+        }
+        
+        // Load real-time metrics
+        async function loadRealtimeMetrics() {
+            try {
+                const response = await fetch('/api/metrics/realtime');
+                const data = await response.json();
+                
+                const realtimeHtml = `
+                    <div class="realtime-metric">
+                        <span>Throughput</span>
+                        <span>${data.current_throughput.toFixed(0)}/hr</span>
+                    </div>
+                    <div class="realtime-metric">
+                        <span>STP Rate</span>
+                        <span>${(data.current_stp_rate * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="realtime-metric">
+                        <span>Accuracy</span>
+                        <span>${(data.current_accuracy * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="realtime-metric">
+                        <span>Queue Depth</span>
+                        <span>${data.poison_queue_count}</span>
+                    </div>
+                `;
+                
+                document.getElementById('realtimeContent').innerHTML = realtimeHtml;
+                
+            } catch (error) {
+                console.error('Error loading real-time metrics:', error);
+                document.getElementById('realtimeContent').innerHTML = '<div>Error loading data</div>';
+            }
+        }
+        
+        // Generate structured summary
+        async function generateSummary() {
+            const summaryType = document.getElementById('summaryType').value;
+            const days = document.getElementById('timePeriod').value;
+            const audience = document.getElementById('audience').value;
+            
+            document.getElementById('summaryContent').innerHTML = '<div class="loading">Generating summary...</div>';
+            
+            try {
+                const response = await fetch(`/api/summary/${summaryType}?days=${days}&audience=${audience}`);
+                const data = await response.json();
+                
+                document.getElementById('summaryContent').innerHTML = `<pre>${data.summary}</pre>`;
+                
+            } catch (error) {
+                console.error('Error generating summary:', error);
+                document.getElementById('summaryContent').innerHTML = '<div>Error generating summary</div>';
+            }
+        }
+        
+        // Generate LLM-enhanced summary
+        async function generateLLMSummary() {
+            const template = document.getElementById('summaryType').value;
+            const days = document.getElementById('timePeriod').value;
+            const audience = document.getElementById('audience').value;
+            
+            document.getElementById('summaryContent').innerHTML = '<div class="loading">Generating AI-enhanced summary...</div>';
+            
+            try {
+                const response = await fetch(`/api/llm-summary?days=${days}&template=${template}&audience=${audience}`);
+                const data = await response.json();
+                
+                document.getElementById('summaryContent').innerHTML = `
+                    <div style="background: #eff6ff; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #3b82f6;">
+                        <strong>🤖 AI-Enhanced Summary</strong> - Generated with LLM assistance
+                    </div>
+                    <pre>${data.summary}</pre>
+                `;
+                
+            } catch (error) {
+                console.error('Error generating LLM summary:', error);
+                document.getElementById('summaryContent').innerHTML = '<div>LLM summary not available - check configuration</div>';
+            }
+        }
+        
+        // Utility functions
+        function getChangeClass(value, target) {
+            if (value >= target) return 'positive';
+            if (value >= target * 0.9) return 'neutral';
+            return 'negative';
+        }
+        
+        function getStatusClass(value, goodThreshold, warningThreshold) {
+            if (value >= goodThreshold) return 'good';
+            if (value >= warningThreshold) return 'warning';
+            return 'critical';
+        }
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (realtimeInterval) {
+                clearInterval(realtimeInterval);
+            }
+        });
+    </script>
+</body>
+</html>
