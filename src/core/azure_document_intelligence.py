@@ -229,10 +229,13 @@ class AzureDocumentIntelligenceOCR:
             if extract_tables and "layout" in model_id.lower():
                 features.append("ocrHighResolution")
             
-            # Start analysis
+            # Start analysis - fix for new SDK API
+            analyze_request = AnalyzeDocumentRequest(bytes_source=document_bytes)
+            
+            # Use the correct API call format
             poller = self.client.begin_analyze_document(
                 model_id=model_id,
-                analyze_request=AnalyzeDocumentRequest(bytes_source=document_bytes),
+                body=analyze_request,
                 features=features if features else None
             )
             
@@ -423,7 +426,12 @@ class AzureDocumentIntelligenceOCR:
         if result.paragraphs:
             for paragraph in result.paragraphs:
                 if paragraph.content and paragraph.bounding_regions:
-                    bbox = self._convert_bounding_region(paragraph.bounding_regions[0])
+                    try:
+                        bbox = self._convert_bounding_region(paragraph.bounding_regions[0])
+                    except Exception as e:
+                        logger.warning(f"Failed to convert paragraph bounding region: {e}")
+                        bbox = BoundingBox(0, 0, 0, 0, 0.0)
+                    
                     text_block = ExtractedText(
                         content=paragraph.content,
                         bounding_box=bbox,
@@ -475,9 +483,50 @@ class AzureDocumentIntelligenceOCR:
         if not bounding_region.polygon or len(bounding_region.polygon) < 4:
             return BoundingBox(0, 0, 0, 0, 0.0)
         
-        # Extract coordinates from polygon
-        x_coords = [point.x for point in bounding_region.polygon]
-        y_coords = [point.y for point in bounding_region.polygon]
+        # Extract coordinates from polygon - handle different polygon formats
+        x_coords = []
+        y_coords = []
+        
+        for point in bounding_region.polygon:
+            if hasattr(point, 'x') and hasattr(point, 'y'):
+                # Point object with x, y attributes
+                x_coords.append(point.x)
+                y_coords.append(point.y)
+            elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                # Point as [x, y] list/tuple
+                x_coords.append(float(point[0]))
+                y_coords.append(float(point[1]))
+            elif isinstance(point, dict):
+                # Dictionary format {'x': value, 'y': value}
+                try:
+                    x_coords.append(float(point['x']))
+                    y_coords.append(float(point['y']))
+                except (KeyError, TypeError) as e:
+                    logger.warning(f"Invalid dictionary point format: {point}, error: {e}")
+                    continue
+            elif isinstance(point, (int, float)):
+                # Single number - this shouldn't happen for 2D coordinates
+                logger.warning(f"Single number found in polygon, skipping: {point}")
+                continue
+            elif hasattr(point, '__iter__') and not isinstance(point, (str, bytes)):
+                # Try to iterate and get first two values (but not strings/bytes)
+                try:
+                    coords = list(point)
+                    if len(coords) >= 2:
+                        x_coords.append(float(coords[0]))
+                        y_coords.append(float(coords[1]))
+                    else:
+                        logger.warning(f"Insufficient coordinates in iterable point: {coords}")
+                        continue
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to convert iterable point to coordinates: {point}, error: {e}")
+                    continue
+            else:
+                logger.warning(f"Unsupported polygon point format: {type(point).__name__} = {point}")
+                continue
+        
+        if not x_coords or not y_coords:
+            return BoundingBox(0, 0, 0, 0, 0.0)
         
         x = min(x_coords)
         y = min(y_coords)
@@ -511,16 +560,24 @@ class AzureDocumentIntelligenceOCR:
             rows[row_idx][col_idx] = cell.content or ""
             
             if cell.bounding_regions:
-                cell_boxes[row_idx][col_idx] = self._convert_bounding_region(cell.bounding_regions[0])
+                try:
+                    cell_boxes[row_idx][col_idx] = self._convert_bounding_region(cell.bounding_regions[0])
+                except Exception as e:
+                    logger.warning(f"Failed to convert cell bounding region: {e}")
+                    cell_boxes[row_idx][col_idx] = BoundingBox(0, 0, 0, 0, 0.0)
         
         # Extract headers (assume first row contains headers)
         headers = rows[0] if rows else None
         
         # Table bounding box
         if table.bounding_regions:
-            table_bbox = self._convert_bounding_region(table.bounding_regions[0])
+            try:
+                table_bbox = self._convert_bounding_region(table.bounding_regions[0])
+            except Exception as e:
+                logger.warning(f"Failed to convert table bounding region: {e}")
+                table_bbox = BoundingBox(0, 0, 0, 0, 0.0)
         else:
-            table_bbox = BoundingBox(0, 0, 0, 0)
+            table_bbox = BoundingBox(0, 0, 0, 0, 0.0)
         
         return ExtractedTable(
             rows=rows,
@@ -538,7 +595,11 @@ class AzureDocumentIntelligenceOCR:
         # Get bounding box if available
         bbox = None
         if field_value.bounding_regions:
-            bbox = self._convert_bounding_region(field_value.bounding_regions[0])
+            try:
+                bbox = self._convert_bounding_region(field_value.bounding_regions[0])
+            except Exception as e:
+                logger.warning(f"Failed to convert field bounding region: {e}")
+                bbox = BoundingBox(0, 0, 0, 0, 0.0)
         
         return ExtractedField(
             field_name=field_name,
@@ -619,14 +680,32 @@ class AzureDocumentIntelligenceOCR:
         
         return stats
     
+    def extract_text(self, document_data: Union[bytes, str, np.ndarray]) -> Dict[str, Any]:
+        """Extract text from document (compatibility method)."""
+        result = self.analyze_document(document_data, DocumentType.GENERAL)
+        
+        # Convert to expected format
+        return {
+            'content': result.full_text,
+            'pages': [{'text': result.full_text, 'confidence': result.confidence_scores.get('text', 0.0)}],
+            'confidence': result.confidence_scores.get('text', 0.0)
+        }
+    
+    async def extract_text_async(self, document_data: Union[bytes, str, np.ndarray]) -> Dict[str, Any]:
+        """Async wrapper for extract_text method."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.extract_text, document_data)
+    
     def validate_connection(self) -> bool:
         """Validate connection to Azure Document Intelligence service."""
         try:
             # Test with a minimal dummy request (this will fail but validate connection)
             test_data = b"test"
+            analyze_request = AnalyzeDocumentRequest(bytes_source=test_data)
             self.client.begin_analyze_document(
                 model_id="prebuilt-read",
-                analyze_request=AnalyzeDocumentRequest(bytes_source=test_data)
+                body=analyze_request
             )
             return True
         except Exception as e:
@@ -642,7 +721,7 @@ class DocumentIntelligenceIntegration:
         self,
         azure_endpoint: str,
         azure_api_key: str,
-        preprocessor: Optional['PDFPreprocessor'] = None,
+        preprocessor: Optional[object] = None,
         default_model: DocumentType = DocumentType.LAYOUT,
         enable_preprocessing: bool = True
     ):

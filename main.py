@@ -259,8 +259,16 @@ class PDFProcessingPipeline:
         """Perform OCR and handwriting recognition."""
         if self.ocr_engine:
             # Use Azure Document Intelligence
-            results = await self.ocr_engine.extract_text(pdf_path)
-            return results
+            try:
+                results = await self.ocr_engine.extract_text_async(pdf_path)
+                return results
+            except Exception as e:
+                logger.warning(f"Azure OCR failed: {e}, using fallback")
+                return {
+                    'content': f'OCR failed: {str(e)}',
+                    'pages': [],
+                    'confidence': 0.0
+                }
         else:
             # Fallback OCR implementation
             return {
@@ -293,13 +301,16 @@ class PDFProcessingPipeline:
         """Generate processing summary."""
         processing_time = time.time() - processing_start
         
+        # Calculate quality score first
+        data_quality_score = self._calculate_quality_score(result)
+        
         return {
             'processing_time_seconds': round(processing_time, 2),
             'total_stages': len(result['stages']),
             'successful_stages': sum(1 for stage in result['stages'].values() if stage['status'] == 'completed'),
             'failed_stages': sum(1 for stage in result['stages'].values() if stage['status'] == 'failed'),
-            'data_quality_score': self._calculate_quality_score(result),
-            'requires_human_review': self._needs_human_review(result)
+            'data_quality_score': data_quality_score,
+            'requires_human_review': self._needs_human_review(result, data_quality_score)
         }
     
     def _calculate_quality_score(self, result: Dict) -> float:
@@ -308,12 +319,18 @@ class PDFProcessingPipeline:
         stage_score = len([s for s in result['stages'].values() if s['status'] == 'completed']) / len(result['stages'])
         return round(stage_score * 100, 1)
     
-    def _needs_human_review(self, result: Dict) -> bool:
+    def _needs_human_review(self, result: Dict, data_quality_score: float = None) -> bool:
         """Determine if document needs human review."""
         # Check if any critical stages failed or validation issues
         critical_failures = sum(1 for stage in ['ocr', 'field_extraction'] 
                               if result['stages'].get(stage, {}).get('status') == 'failed')
-        return critical_failures > 0 or result['summary']['data_quality_score'] < 80
+        
+        # Use provided quality score or try to get it from result
+        quality_score = data_quality_score
+        if quality_score is None:
+            quality_score = result.get('summary', {}).get('data_quality_score', 0.0)
+        
+        return critical_failures > 0 or quality_score < 80
 
 
 def load_configuration() -> Dict[str, Any]:
@@ -343,32 +360,6 @@ async def run_monitor_mode(config: Dict[str, Any]):
     # Store pending tasks to keep track of processing
     pending_tasks = set()
     
-    def pdf_handler(blob_name: str, blob_client):
-        """Handle new PDF files."""
-        logger.info(f"📄 New PDF detected: {blob_name}")
-        
-        # Create a task for async processing
-        try:
-            loop = asyncio.get_running_loop()
-            task = loop.create_task(process_and_display_pdf(blob_name, blob_client, pipeline))
-            pending_tasks.add(task)
-            task.add_done_callback(lambda t: pending_tasks.discard(t))
-        except RuntimeError:
-            # No event loop running, create a simplified synchronous version
-            logger.warning("No event loop available, processing synchronously")
-            try:
-                # Create a simplified processing result
-                result = {
-                    'blob_name': blob_name,
-                    'status': 'processed_sync',
-                    'message': 'Processed without full pipeline due to event loop constraints'
-                }
-                print(f"\n📄 DETECTED: {blob_name}")
-                print(f"Status: Queued for processing")
-                print("Note: Full async processing requires event loop context\n")
-            except Exception as e:
-                logger.error(f"Error in sync processing: {e}")
-    
     async def process_and_display_pdf(blob_name: str, blob_client, pipeline):
         """Process PDF and display results."""
         try:
@@ -386,9 +377,6 @@ async def run_monitor_mode(config: Dict[str, Any]):
             print(f"\n❌ PROCESSING FAILED: {blob_name}")
             print(f"Error: {e}\n")
     
-    # Set up the PDF listener
-    pipeline.pdf_listener.set_pdf_callback(pdf_handler)
-    
     # Show current status
     print(f"📁 Monitoring container: {config['container_name']}")
     print(f"🏢 Storage account: {config['storage_account']}")
@@ -401,11 +389,8 @@ async def run_monitor_mode(config: Dict[str, Any]):
         print("   Press Ctrl+C to stop")
         print()
         
-        # Run the polling in a separate task to avoid blocking
-        polling_task = asyncio.create_task(run_polling_async(pipeline.pdf_listener))
-        
-        # Wait for the polling task (which runs indefinitely)
-        await polling_task
+        # Run our own async polling loop instead of using the synchronous one
+        await run_async_polling_loop(pipeline, pending_tasks, process_and_display_pdf)
         
     except KeyboardInterrupt:
         logger.info("🛑 Monitoring stopped by user")
@@ -423,20 +408,50 @@ async def run_monitor_mode(config: Dict[str, Any]):
         print(f"   Errors: {pipeline.stats['errors']}")
 
 
-async def run_polling_async(pdf_listener):
-    """Run PDF listener polling in async context."""
-    # We need to modify this to work with async/await
-    # For now, run the polling in an executor
-    loop = asyncio.get_running_loop()
+async def run_async_polling_loop(pipeline, pending_tasks, process_and_display_pdf):
+    """Run an async polling loop that properly handles PDF detection and processing."""
+    processed_files = set()
+    polling_interval = pipeline.config.get('polling_interval', 30)
     
-    def run_polling():
+    while True:
         try:
-            pdf_listener.start_polling()
+            # Get current PDF files from the container
+            current_files = pipeline.pdf_listener.get_pdf_files()
+            
+            # Check for new files
+            for file_info in current_files:
+                blob_name = file_info['name']
+                
+                # Check if this is a new file we haven't processed
+                if blob_name not in processed_files:
+                    logger.info(f"📄 New PDF detected: {blob_name}")
+                    print(f"\n📄 DETECTED: {blob_name}")
+                    print(f"   Size: {file_info['size']} bytes")
+                    print(f"   Last modified: {file_info['last_modified']}")
+                    print("   Starting processing...")
+                    
+                    # Get blob client for this file
+                    blob_client = pipeline.pdf_listener.get_blob_client(blob_name)
+                    
+                    # Create async task for processing
+                    task = asyncio.create_task(
+                        process_and_display_pdf(blob_name, blob_client, pipeline)
+                    )
+                    pending_tasks.add(task)
+                    task.add_done_callback(lambda t: pending_tasks.discard(t))
+                    
+                    # Mark as processed
+                    processed_files.add(blob_name)
+            
+            # Sleep for the polling interval
+            await asyncio.sleep(polling_interval)
+            
         except KeyboardInterrupt:
-            pass
-    
-    # Run the blocking polling in a thread pool
-    await loop.run_in_executor(None, run_polling)
+            logger.info("Polling stopped by user")
+            break
+        except Exception as e:
+            logger.error(f"Error during polling: {e}")
+            await asyncio.sleep(polling_interval)
 
 
 async def run_process_mode(config: Dict[str, Any], filename: str):

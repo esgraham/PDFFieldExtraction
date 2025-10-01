@@ -10,12 +10,8 @@ This package contains the core functionality for:
 - Integration components
 """
 
-from .azure_pdf_listener import AzurePDFListener
-from .pdf_preprocessor import PDFPreprocessor
-from .document_classifier import DocumentClassifier
-from .azure_document_intelligence import AzureDocumentIntelligenceOCR as AzureDocumentIntelligence
-from .field_extraction import FieldExtractor
-from .validation_engine import ComprehensiveValidator
+# Lazy imports to avoid slow startup with heavy dependencies like PyTorch
+# Import modules directly in your code instead of using this __init__.py
 
 __all__ = [
     'AzurePDFListener',

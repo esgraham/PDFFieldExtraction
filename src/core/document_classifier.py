@@ -16,6 +16,7 @@ Features:
 import cv2
 import numpy as np
 import logging
+import os
 from typing import Dict, List, Tuple, Optional, Any, Union
 from pathlib import Path
 from dataclasses import dataclass
@@ -33,12 +34,22 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-# Optional transformer support
-try:
-    from sentence_transformers import SentenceTransformer
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
+# Optional transformer support - use lazy import to avoid slow startup
+TRANSFORMERS_AVAILABLE = False
+_sentence_transformer_module = None
+
+def _get_sentence_transformer():
+    """Lazy import of sentence transformers to avoid slow startup."""
+    global _sentence_transformer_module, TRANSFORMERS_AVAILABLE
+    if _sentence_transformer_module is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            _sentence_transformer_module = SentenceTransformer
+            TRANSFORMERS_AVAILABLE = True
+        except ImportError:
+            TRANSFORMERS_AVAILABLE = False
+            _sentence_transformer_module = False
+    return _sentence_transformer_module if _sentence_transformer_module is not False else None
 
 # Optional OCR support
 try:
@@ -138,7 +149,9 @@ class DocumentClassifier:
             debug_mode: Enable detailed logging and feature saving
         """
         self.model_type = model_type
-        self.use_transformers = use_transformers and TRANSFORMERS_AVAILABLE
+        # Check environment variable to disable transformers for faster startup
+        disable_transformers = os.getenv('DISABLE_TRANSFORMERS', '').lower() in ('1', 'true', 'yes')
+        self.use_transformers = use_transformers and TRANSFORMERS_AVAILABLE and not disable_transformers
         self.enable_ocr = enable_ocr and OCR_AVAILABLE
         self.cache_features = cache_features
         self.debug_mode = debug_mode
@@ -149,15 +162,17 @@ class DocumentClassifier:
         self.label_encoder = LabelEncoder()
         self.tfidf_vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
         
-        # Initialize transformer model if requested
+        # Initialize transformer model if requested (lazy loading)
         self.sentence_transformer = None
+        self.transformer_model = transformer_model
         if self.use_transformers:
-            try:
-                self.sentence_transformer = SentenceTransformer(transformer_model)
-                logger.info(f"Loaded transformer model: {transformer_model}")
-            except Exception as e:
-                logger.warning(f"Failed to load transformer model: {e}")
+            # Check if transformers are available but don't load yet
+            SentenceTransformer = _get_sentence_transformer()
+            if SentenceTransformer is None:
+                logger.warning("Sentence transformers not available, disabling transformer features")
                 self.use_transformers = False
+            else:
+                logger.info(f"Transformer support enabled, will load {transformer_model} when needed")
         
         # Feature cache
         self.feature_cache = {} if cache_features else None
@@ -288,11 +303,22 @@ class DocumentClassifier:
         # Language detection (simple heuristic)
         language = self._detect_language(text)
         
-        # Text embedding
+        # Text embedding (lazy load transformer when needed)
         text_embedding = None
         if self.use_transformers and text.strip():
             try:
-                text_embedding = self.sentence_transformer.encode(text)
+                # Lazy load the transformer model when actually needed
+                if self.sentence_transformer is None:
+                    SentenceTransformer = _get_sentence_transformer()
+                    if SentenceTransformer:
+                        self.sentence_transformer = SentenceTransformer(self.transformer_model)
+                        logger.info(f"Loaded transformer model: {self.transformer_model}")
+                    else:
+                        logger.warning("Failed to load sentence transformers")
+                        self.use_transformers = False
+                
+                if self.sentence_transformer:
+                    text_embedding = self.sentence_transformer.encode(text)
             except Exception as e:
                 logger.warning(f"Failed to generate text embedding: {e}")
         
