@@ -72,18 +72,30 @@ class AzurePDFListener:
     def _initialize_clients(self):
         """Initialize Azure Storage clients."""
         try:
-            if self.use_managed_identity:
+            # Try connection string first, then fall back to Azure Identity
+            if self.connection_string and not self.use_managed_identity:
+                try:
+                    self.blob_service_client = BlobServiceClient.from_connection_string(
+                        self.connection_string
+                    )
+                    self.logger.info("Using connection string authentication")
+                except Exception as e:
+                    if "Authorization with Shared Key is disabled" in str(e):
+                        self.logger.warning("Shared Key disabled, falling back to Azure Identity")
+                        self.use_managed_identity = True
+                    else:
+                        raise
+            
+            if self.use_managed_identity or not self.connection_string:
                 credential = DefaultAzureCredential()
                 account_url = f"https://{self.storage_account_name}.blob.core.windows.net"
                 self.blob_service_client = BlobServiceClient(
                     account_url=account_url,
                     credential=credential
                 )
-            elif self.connection_string:
-                self.blob_service_client = BlobServiceClient.from_connection_string(
-                    self.connection_string
-                )
-            else:
+                self.logger.info("Using Azure Identity authentication")
+            
+            if not hasattr(self, 'blob_service_client'):
                 raise ValueError(
                     "Either connection_string or use_managed_identity=True must be provided"
                 )

@@ -75,21 +75,23 @@ try:
 except ImportError:
     HAS_VALIDATION_ENGINE = False
     ComprehensiveValidator = None
-        """Validate using Luhn algorithm."""
-        if not number or not number.isdigit():
-            return False
-            
-        # Convert to list of integers
-        digits = [int(d) for d in number]
+
+def validate_luhn(number: str) -> bool:
+    """Validate using Luhn algorithm."""
+    if not number or not number.isdigit():
+        return False
         
-        # Apply Luhn algorithm
-        for i in range(len(digits) - 2, -1, -2):
-            digits[i] *= 2
-            if digits[i] > 9:
-                digits[i] -= 9
-        
-        return sum(digits) % 10 == 0
+    # Convert to list of integers
+    digits = [int(d) for d in number]
     
+    # Apply Luhn algorithm
+    for i in range(len(digits) - 2, -1, -2):
+        digits[i] *= 2
+        if digits[i] > 9:
+            digits[i] -= 9
+    
+    return sum(digits) % 10 == 0
+
     @staticmethod
     def generate_check_digit(partial_number: str) -> str:
         """Generate Luhn check digit for partial number."""

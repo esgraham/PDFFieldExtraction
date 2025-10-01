@@ -13,7 +13,7 @@ This package contains the core functionality for:
 from .azure_pdf_listener import AzurePDFListener
 from .pdf_preprocessor import PDFPreprocessor
 from .document_classifier import DocumentClassifier
-from .azure_document_intelligence import AzureDocumentIntelligence
+from .azure_document_intelligence import AzureDocumentIntelligenceOCR as AzureDocumentIntelligence
 from .field_extraction import FieldExtractionEngine
 from .validation_engine import ValidationEngine
 

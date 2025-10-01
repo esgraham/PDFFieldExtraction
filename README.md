@@ -156,9 +156,15 @@ python examples/simple_monitor.py
    - Name: `pdfs` (or your preferred name)
    - Public access level: "Private"
 
-4. **Get Connection String**:
+4. **Get Authentication Details**:
+   
+   **If using Connection String (traditional method)**:
    - Go to "Access keys" in your storage account
    - Copy "Connection string" from key1 or key2
+   
+   **If Shared Key is disabled (enterprise environments)**:
+   - Just note your storage account name
+   - You'll use Azure Identity instead (see Step 3 configuration options)
 
 #### Optional: Azure Document Intelligence (for advanced OCR)
 1. **Create Document Intelligence Resource**:
@@ -173,17 +179,23 @@ python examples/simple_monitor.py
 git clone <repository-url>
 cd PDFFieldExtraction
 
-# 2. Install dependencies
+# 2. Install system dependencies (Linux/Ubuntu)
+sudo apt-get update
+sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1
+
+# 3. Install Python dependencies
 pip install -r requirements.txt
 # Or for full features: pip install -r requirements/requirements_complete.txt
 
-# 3. Setup configuration
+# 4. Setup configuration
 cp config/.env.example .env
 ```
 
 ### Step 3: Configure Environment
 
 Edit the `.env` file with your Azure credentials:
+
+**Option A: Connection String (Traditional)**
 ```env
 # Required - Azure Storage
 AZURE_STORAGE_ACCOUNT_NAME=your_storage_account_name
@@ -195,14 +207,31 @@ AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-region.cognitiveservices.azure
 AZURE_DOCUMENT_INTELLIGENCE_KEY=your_api_key
 ```
 
+**Option B: Azure Identity (If Shared Key disabled)**
+```env
+# Required - Azure Storage (No connection string needed)
+AZURE_STORAGE_ACCOUNT_NAME=your_storage_account_name
+AZURE_STORAGE_CONTAINER_NAME=pdfs
+# Note: No AZURE_STORAGE_CONNECTION_STRING needed
+
+# Optional - Document Intelligence OCR
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-region.cognitiveservices.azure.com/
+AZURE_DOCUMENT_INTELLIGENCE_KEY=your_api_key
+```
+
+> 💡 **The system automatically detects if Shared Key is disabled and falls back to Azure Identity**
+
 ### Step 4: Test Your Setup
 
 ```bash
-# Test basic connection
-python -c "from src.core.azure_pdf_listener import AzurePDFListener; print('✅ Setup successful!')"
+# Run connection test (recommended)
+.venv/bin/python tests/test_azure_connection.py
 
-# Or run validation
-python main.py validate
+# Or use Python directly if virtual environment activated
+python tests/test_azure_connection.py
+
+# Or test basic import
+.venv/bin/python -c "from src.core.azure_pdf_listener import AzurePDFListener; print('✅ Setup successful!')"
 ```
 
 ### Step 5: Start the System
@@ -313,6 +342,63 @@ pip install -r requirements.txt
 #### "Container not found" Error  
 - Create container named `pdfs` in your storage account
 - Or update `AZURE_STORAGE_CONTAINER_NAME` in `.env`
+
+#### "Authorization with Shared Key is disabled" Error
+This happens when your Azure Storage account has disabled shared key authentication. **Two solutions:**
+
+**Option 1: Enable Shared Key (Quickest)**
+1. Go to Azure Portal → Your Storage Account → Configuration
+2. Find "Allow shared key access" → Change to "Enabled"
+3. Click "Save"
+
+**Option 2: Use Azure Identity (More secure)**
+```bash
+# 1. Install Azure CLI first
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+# Or on macOS: brew install azure-cli
+# Or on Windows: winget install Microsoft.AzureCLI
+
+# 2. Install Azure Identity Python package
+pip install azure-identity
+
+# 3. Update your .env file - remove connection string, add these:
+AZURE_STORAGE_ACCOUNT_NAME=your_storage_account_name
+AZURE_STORAGE_CONTAINER_NAME=pdfs
+# Remove: AZURE_STORAGE_CONNECTION_STRING
+
+# 4. Login to Azure CLI
+az login
+```
+
+Then the system will automatically use your Azure credentials instead of connection strings.
+
+#### "AuthorizationPermissionMismatch" Error
+This happens when your user account lacks permissions to access the storage account. **Solutions:**
+
+**Option 1: Add Storage Permissions (Recommended)**
+1. Go to Azure Portal → Your Storage Account → Access Control (IAM)
+2. Click "Add" → "Add role assignment"
+3. Select one of these roles:
+   - **Storage Blob Data Contributor** (read/write access)
+   - **Storage Blob Data Reader** (read-only access)
+4. Search for your email/username and assign the role
+5. Wait 5-10 minutes for permissions to propagate
+
+**Option 2: Use Connection String Instead**
+```bash
+# In your .env file, add the connection string:
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+```
+
+**Option 3: Check Your Subscription**
+```bash
+# Verify you're in the correct subscription
+az account show
+az account list --output table
+
+# Switch if needed
+az account set --subscription "your-subscription-name"
+```
 
 #### Can't access web interface
 ```bash
