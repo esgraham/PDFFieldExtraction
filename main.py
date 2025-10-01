@@ -29,6 +29,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+# Additional imports for processing
+import numpy as np
+import cv2
+
 # Add the src directory to the Python path
 src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
@@ -40,7 +44,7 @@ from core.azure_pdf_listener import AzurePDFListener
 from core.pdf_preprocessor import PDFPreprocessor
 from core.document_classifier import DocumentClassifier
 from core.azure_document_intelligence import AzureDocumentIntelligenceOCR
-from core.field_extraction import FieldExtractor
+from src.core.field_extraction import DocumentTemplate, FieldExtractor
 from core.validation_engine import ComprehensiveValidator
 
 # Set up logging
@@ -173,13 +177,21 @@ class PDFProcessingPipeline:
                 ocr_results = await self._perform_ocr(preprocessed_path)
                 result['stages']['ocr'] = {
                     'status': 'completed',
-                    'text_length': len(ocr_results.get('content', '')),
-                    'pages': len(ocr_results.get('pages', [])),
-                    'confidence': ocr_results.get('confidence', 0.0)
+                    'text_length': len(getattr(ocr_results, 'full_text', '')),
+                    'pages': getattr(ocr_results, 'pages', 1),
+                    'confidence': getattr(ocr_results, 'confidence_scores', {}).get('text', 0.0)
                 }
             except Exception as e:
                 logger.error(f"OCR failed: {e}")
-                ocr_results = {'content': '', 'pages': [], 'confidence': 0.0}
+                # Create mock object for fallback
+                class MockOCRResult:
+                    def __init__(self):
+                        self.full_text = ''
+                        self.fields = []
+                        self.text_blocks = []
+                        self.tables = []
+                        self.confidence_scores = {'text': 0.0}
+                ocr_results = MockOCRResult()
                 result['stages']['ocr'] = {
                     'status': 'failed',
                     'error': str(e)
@@ -247,55 +259,160 @@ class PDFProcessingPipeline:
     
     async def _preprocess_pdf(self, pdf_path: str) -> str:
         """Preprocess PDF for better OCR results."""
-        # This would use the PDFPreprocessor to deskew, denoise, etc.
-        return pdf_path  # For now, return original path
+        try:
+            # Use the PDFPreprocessor to deskew, denoise, etc.
+            loop = asyncio.get_event_loop()
+            preprocessed_path = await loop.run_in_executor(
+                None, self.preprocessor.process_pdf, pdf_path
+            )
+            return preprocessed_path
+        except Exception as e:
+            logger.warning(f"PDF preprocessing failed: {e}, using original file")
+            return pdf_path
     
     async def _classify_document(self, pdf_path: str) -> tuple:
         """Classify document type."""
-        # This would use the DocumentClassifier
-        return "invoice", 0.85  # Placeholder
+        try:
+            # Convert PDF to image for classification
+            import cv2
+            from pdf2image import convert_from_path
+            
+            # Get first page as image
+            loop = asyncio.get_event_loop()
+            
+            # Create a wrapper function to handle keyword arguments
+            def convert_first_page():
+                return convert_from_path(pdf_path, first_page=1, last_page=1)
+            
+            pages = await loop.run_in_executor(None, convert_first_page)
+            
+            if pages:
+                # Convert PIL image to numpy array
+                import numpy as np
+                image = np.array(pages[0])
+                
+                # Use the DocumentClassifier
+                if hasattr(self.classifier, 'is_trained') and not self.classifier.is_trained:
+                    logger.warning("DocumentClassifier not trained, using basic classification")
+                    return "unknown", 0.5
+                
+                classification_result = await loop.run_in_executor(
+                    None, self.classifier.classify, image
+                )
+                return classification_result.predicted_class.value, classification_result.confidence
+            else:
+                logger.warning("Could not extract image from PDF for classification")
+                return "unknown", 0.5
+                
+        except Exception as e:
+            logger.warning(f"Document classification failed: {e}")
+            return "unknown", 0.5
     
-    async def _perform_ocr(self, pdf_path: str) -> Dict[str, Any]:
+    async def _perform_ocr(self, pdf_path: str) -> Any:
         """Perform OCR and handwriting recognition."""
         if self.ocr_engine:
-            # Use Azure Document Intelligence
+            # Use Azure Document Intelligence - return DocumentAnalysisResult object
             try:
-                results = await self.ocr_engine.extract_text_async(pdf_path)
+                # Use analyze_document directly instead of extract_text_async to get full object
+                loop = asyncio.get_event_loop()
+                with open(pdf_path, 'rb') as f:
+                    pdf_bytes = f.read()
+                results = await loop.run_in_executor(
+                    None, self.ocr_engine.analyze_document, pdf_bytes
+                )
                 return results
             except Exception as e:
                 logger.warning(f"Azure OCR failed: {e}, using fallback")
-                return {
-                    'content': f'OCR failed: {str(e)}',
-                    'pages': [],
-                    'confidence': 0.0
-                }
+                # Create a mock DocumentAnalysisResult-like object for fallback
+                class MockOCRResult:
+                    def __init__(self, error_msg):
+                        self.full_text = f'OCR failed: {error_msg}'
+                        self.fields = []
+                        self.text_blocks = []
+                        self.tables = []
+                        self.confidence_scores = {'text': 0.0}
+                return MockOCRResult(str(e))
         else:
-            # Fallback OCR implementation
-            return {
-                'content': 'OCR not configured',
-                'pages': [],
-                'confidence': 0.0
-            }
+            # Fallback OCR implementation - create mock object
+            class MockOCRResult:
+                def __init__(self):
+                    self.full_text = 'OCR not configured'
+                    self.fields = []
+                    self.text_blocks = []
+                    self.tables = []
+                    self.confidence_scores = {'text': 0.0}
+            return MockOCRResult()
     
-    async def _extract_fields(self, ocr_results: Dict, doc_type: str) -> Dict[str, Any]:
+    async def _extract_fields(self, ocr_results: Any, doc_type: str) -> Dict[str, Any]:
         """Extract structured fields from OCR results."""
-        # This would use the FieldExtractor
-        return {
-            'document_type': doc_type,
-            'total_amount': '1,234.56',
-            'date': '2024-01-15',
-            'vendor': 'Example Corp',
-            'confidence_scores': {
-                'total_amount': 0.92,
-                'date': 0.88,
-                'vendor': 0.95
+        try:
+            # Convert string doc_type to DocumentTemplate enum
+            template_mapping = {
+                'invoice': DocumentTemplate.INVOICE,
+                'receipt': DocumentTemplate.RECEIPT,
+                'purchase_order': DocumentTemplate.PURCHASE_ORDER,
+                'tax_form': DocumentTemplate.TAX_FORM,
+                'contract': DocumentTemplate.CONTRACT,
+                'form_application': DocumentTemplate.FORM_APPLICATION,
+                'bank_statement': DocumentTemplate.BANK_STATEMENT,
+                'insurance_claim': DocumentTemplate.INSURANCE_CLAIM,
             }
-        }
+            
+            doc_template = template_mapping.get(doc_type.lower(), DocumentTemplate.CUSTOM)
+            
+            # Use the FieldExtractor to extract structured data
+            loop = asyncio.get_event_loop()
+            extraction_result = await loop.run_in_executor(
+                None, self.field_extractor.extract_fields, ocr_results, doc_template
+            )
+            
+            # Convert ExtractionResult to dictionary format
+            if hasattr(extraction_result, 'extracted_fields'):
+                # Convert field objects to dictionary format
+                fields_dict = {}
+                for field in extraction_result.extracted_fields:
+                    fields_dict[field.field_name] = {
+                        'value': field.normalized_value or field.value,
+                        'confidence': field.confidence,
+                        'source': getattr(field, 'source', 'extracted')
+                    }
+                
+                fields_dict['document_type'] = doc_type
+                fields_dict['template_type'] = extraction_result.template_type.value
+                fields_dict['overall_confidence'] = extraction_result.overall_confidence
+                return fields_dict
+            else:
+                # Fallback if result format is unexpected
+                return {
+                    'document_type': doc_type,
+                    'extraction_result': str(extraction_result),
+                    'confidence_scores': {}
+                }
+            
+        except Exception as e:
+            logger.warning(f"Field extraction failed: {e}")
+            # Return minimal fallback data
+            return {
+                'document_type': doc_type,
+                'extraction_error': str(e),
+                'confidence_scores': {}
+            }
     
     async def _validate_data(self, extracted_fields: Dict, doc_type: str) -> List[Any]:
         """Validate extracted data against business rules."""
-        # This would use the ComprehensiveValidator
-        return []  # Placeholder
+        try:
+            # Use the ComprehensiveValidator
+            loop = asyncio.get_event_loop()
+            validation_results = await loop.run_in_executor(
+                None, self.validator.validate_document, extracted_fields, doc_type
+            )
+            
+            return validation_results
+            
+        except Exception as e:
+            logger.warning(f"Data validation failed: {e}")
+            # Return empty validation results on error
+            return []
     
     def _generate_summary(self, result: Dict, processing_start: float) -> Dict[str, Any]:
         """Generate processing summary."""
@@ -392,12 +509,16 @@ async def run_monitor_mode(config: Dict[str, Any]):
         # Run our own async polling loop instead of using the synchronous one
         await run_async_polling_loop(pipeline, pending_tasks, process_and_display_pdf)
         
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("🛑 Monitoring stopped by user")
         
-        # Wait for any pending tasks to complete
+        # Cancel any pending tasks gracefully
         if pending_tasks:
-            logger.info(f"Waiting for {len(pending_tasks)} pending tasks to complete...")
+            logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
+            for task in pending_tasks:
+                if not task.done():
+                    task.cancel()
+            # Wait for cancellation to complete
             await asyncio.gather(*pending_tasks, return_exceptions=True)
         
         # Show final statistics
@@ -446,6 +567,9 @@ async def run_async_polling_loop(pipeline, pending_tasks, process_and_display_pd
             # Sleep for the polling interval
             await asyncio.sleep(polling_interval)
             
+        except asyncio.CancelledError:
+            logger.info("Polling task cancelled")
+            break
         except KeyboardInterrupt:
             logger.info("Polling stopped by user")
             break

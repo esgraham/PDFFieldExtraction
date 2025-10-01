@@ -746,7 +746,12 @@ class FieldExtractor:
         # Get document schema
         schema = self.schemas.get(document_type)
         if not schema:
-            raise ValueError(f"No schema found for document type: {document_type}")
+            if document_type == DocumentTemplate.CUSTOM:
+                # Create a basic default schema for custom documents
+                logger.warning(f"No schema found for {document_type}, using generic extraction")
+                schema = self._create_generic_schema()
+            else:
+                raise ValueError(f"No schema found for document type: {document_type}")
         
         # Extract fields using template
         extracted_fields = self._extract_template_fields(ocr_result, schema)
@@ -868,6 +873,50 @@ class FieldExtractor:
                 
             except Exception as e:
                 logger.error(f"Failed to load schema from {schema_file}: {e}")
+    
+    def _create_generic_schema(self) -> DocumentSchema:
+        """Create a generic schema for custom/unknown document types."""
+        fields = [
+            FieldSchema(
+                name="text_content",
+                field_type=FieldType.TEXT,
+                required=False,
+                synonyms=[],
+                validation_rules=[],
+                default_value=None,
+                confidence_threshold=0.5,
+                description="All text content from the document"
+            ),
+            FieldSchema(
+                name="dates",
+                field_type=FieldType.DATE,
+                required=False,
+                synonyms=["date", "dated"],
+                validation_rules=[],
+                default_value=None,
+                confidence_threshold=0.6,
+                description="Any dates found in the document"
+            ),
+            FieldSchema(
+                name="amounts",
+                field_type=FieldType.CURRENCY,
+                required=False,
+                synonyms=["amount", "total", "sum", "value"],
+                validation_rules=[],
+                default_value=None,
+                confidence_threshold=0.6,
+                description="Any monetary amounts found"
+            )
+        ]
+        
+        return DocumentSchema(
+            template_type=DocumentTemplate.CUSTOM,
+            version="1.0",
+            fields=fields,
+            tables=[],
+            business_rules=[],
+            required_confidence=0.5
+        )
     
     def _create_default_schemas(self):
         """Create default document schemas."""

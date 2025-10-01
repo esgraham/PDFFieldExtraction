@@ -618,8 +618,13 @@ class ComprehensiveValidator:
         """Validate a single field with comprehensive rules."""
         results = []
         
+        # Extract actual value if it's in dictionary format
+        actual_value = value
+        if isinstance(value, dict) and 'value' in value:
+            actual_value = value['value']
+        
         # Required check
-        if config.required and (not value or str(value).strip() == ""):
+        if config.required and (not actual_value or str(actual_value).strip() == ""):
             results.append(ValidationResult(
                 field_name=field_name,
                 is_valid=False,
@@ -629,37 +634,37 @@ class ComprehensiveValidator:
             ))
             return results  # Don't continue if required field is empty
         
-        if not value:
+        if not actual_value:
             return results  # Skip other validations if value is empty for optional fields
         
         # Regex patterns
         if config.patterns:
             for pattern in config.patterns:
-                result = self.advanced_validator.validate_regex(value, pattern, field_name)
+                result = self.advanced_validator.validate_regex(actual_value, pattern, field_name)
                 results.append(result)
         
         # Luhn check
         if config.luhn_check:
-            result = self.advanced_validator.validate_luhn(value, field_name)
+            result = self.advanced_validator.validate_luhn(actual_value, field_name)
             results.append(result)
         
         # Date format validation
         if config.date_formats:
-            result = self.advanced_validator.validate_date_format(value, config.date_formats, field_name)
+            result = self.advanced_validator.validate_date_format(actual_value, config.date_formats, field_name)
             results.append(result)
         
         # Date range validation
         if config.date_range:
             min_date = config.date_range.get('min_date')
             max_date = config.date_range.get('max_date')
-            result = self.advanced_validator.validate_date_range(value, min_date, max_date, field_name)
+            result = self.advanced_validator.validate_date_range(actual_value, min_date, max_date, field_name)
             results.append(result)
         
         # Length validation
         if config.length_range:
             min_len = config.length_range.get('min', 0)
             max_len = config.length_range.get('max', float('inf'))
-            value_len = len(str(value))
+            value_len = len(str(actual_value))
             
             if value_len < min_len or value_len > max_len:
                 results.append(ValidationResult(
@@ -673,10 +678,15 @@ class ComprehensiveValidator:
         return results
     
     def validate_document(self, extracted_fields: Dict[str, Any], 
-                         field_configs: Dict[str, ValidationConfig],
+                         field_configs: Union[Dict[str, ValidationConfig], str],
                          custom_business_rules: List[Dict] = None) -> List[ValidationResult]:
         """Validate entire document with field and cross-field rules."""
         all_results = []
+        
+        # Handle case where doc_type string is passed instead of field_configs
+        if isinstance(field_configs, str):
+            doc_type = field_configs
+            field_configs = self._generate_field_configs_for_document_type(doc_type, extracted_fields)
         
         # Validate individual fields
         for field_name, config in field_configs.items():
@@ -695,6 +705,74 @@ class ComprehensiveValidator:
         all_results.extend(cross_field_results)
         
         return all_results
+    
+    def _generate_field_configs_for_document_type(self, doc_type: str, extracted_fields: Dict[str, Any]) -> Dict[str, ValidationConfig]:
+        """Generate field validation configs based on document type and extracted fields."""
+        configs = {}
+        
+        # Create basic configs for all extracted fields
+        for field_name, field_value in extracted_fields.items():
+            if field_name in ['document_type', 'template_type', 'overall_confidence']:
+                continue  # Skip metadata fields
+                
+            # Determine field type and create appropriate config
+            if isinstance(field_value, dict) and 'value' in field_value:
+                actual_value = field_value['value']
+            else:
+                actual_value = field_value
+            
+            # Create basic validation config based on field content
+            field_type = self._infer_field_type(field_name, actual_value)
+            
+            config = ValidationConfig(
+                required=field_name in self._get_required_fields_for_doc_type(doc_type),
+                patterns=self._get_patterns_for_field_type(field_type),
+                length_range={'min': 1 if actual_value else 0, 'max': 1000} if field_type == 'text' else None,
+                date_formats=['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y'] if field_type == 'date' else None,
+                numeric_range={'min': 0, 'max': 999999999} if field_type == 'currency' else None
+            )
+            configs[field_name] = config
+        
+        return configs
+    
+    def _get_required_fields_for_doc_type(self, doc_type: str) -> List[str]:
+        """Get required fields for a document type."""
+        required_fields_map = {
+            'invoice': ['invoice_number', 'amount', 'date'],
+            'receipt': ['total', 'date'],
+            'purchase_order': ['po_number', 'amount'],
+            'custom': []  # No required fields for custom documents
+        }
+        return required_fields_map.get(doc_type.lower(), [])
+    
+    def _infer_field_type(self, field_name: str, value: Any) -> str:
+        """Infer field type from field name and value."""
+        field_name_lower = field_name.lower()
+        
+        if 'date' in field_name_lower:
+            return 'date'
+        elif any(word in field_name_lower for word in ['amount', 'total', 'price', 'cost', 'sum']):
+            return 'currency'
+        elif any(word in field_name_lower for word in ['number', 'id', 'code']):
+            return 'alphanumeric'
+        elif 'email' in field_name_lower:
+            return 'email'
+        elif 'phone' in field_name_lower:
+            return 'phone'
+        else:
+            return 'text'
+    
+    def _get_patterns_for_field_type(self, field_type: str) -> List[str]:
+        """Get validation patterns for a field type."""
+        pattern_map = {
+            'email': [r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'],
+            'phone': [r'^\+?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}$'],
+            'currency': [r'^\$?[\d,]+\.?\d{0,2}$'],
+            'alphanumeric': [r'^[A-Za-z0-9-]+$'],
+            'text': [],
+            'date': []  # Date validation handled by date_formats
+        }
+        return pattern_map.get(field_type, [])
     
     def should_route_to_hitl(self, validation_results: List[ValidationResult], 
                            confidence_scores: Dict[str, float],

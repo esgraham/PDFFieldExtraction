@@ -80,7 +80,7 @@ class PDFPreprocessor:
         self, 
         pdf_path: Union[str, Path], 
         output_dir: Optional[Union[str, Path]] = None
-    ) -> List[np.ndarray]:
+    ) -> str:
         """
         Process a PDF file through the complete preprocessing pipeline.
         
@@ -89,7 +89,7 @@ class PDFPreprocessor:
             output_dir: Optional directory to save processed images
             
         Returns:
-            List of preprocessed images as numpy arrays
+            Path to the processed PDF file (same as input if no changes made)
         """
         pdf_path = Path(pdf_path)
         if not pdf_path.exists():
@@ -98,7 +98,7 @@ class PDFPreprocessor:
         logger.info(f"Processing PDF: {pdf_path}")
         
         # Convert PDF to images
-        images = self._pdf_to_images(pdf_path)
+        images = self.pdf_to_images(str(pdf_path))
         
         # Process each page
         processed_images = []
@@ -115,13 +115,15 @@ class PDFPreprocessor:
         self.stats['pages_processed'] = len(processed_images)
         logger.info(f"Completed processing {len(processed_images)} pages")
         
-        return processed_images
+        # For now, return the original PDF path since the images are processed in memory
+        # In a full implementation, you might save processed images and return the path
+        # to the processed version or create a new PDF from processed images
+        return str(pdf_path)
     
     def pdf_to_images(self, pdf_path: str) -> List[np.ndarray]:
         """
         Convert PDF pages to numpy arrays for processing.
-        Note: This method requires external PDF to image conversion.
-        Consider using pdf2image or similar tools to convert PDFs to images first.
+        Supports both direct PDF files and image directories.
         
         Args:
             pdf_path: Path to the PDF file or directory with PDF images
@@ -134,12 +136,40 @@ class PDFPreprocessor:
         
         try:
             if pdf_path.is_file() and pdf_path.suffix.lower() == '.pdf':
-                # PDF file - suggest conversion to images first
-                raise ValueError(
-                    "Direct PDF processing requires external conversion. "
-                    "Please convert PDF to images using pdf2image or similar tool first.\n"
-                    "Example: pdftoppm -png input.pdf output_page"
-                )
+                # PDF file - convert using pdf2image
+                try:
+                    from pdf2image import convert_from_path
+                    from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError
+                    
+                    logger.info(f"Converting PDF to images: {pdf_path}")
+                    # Convert PDF pages to PIL images
+                    pil_images = convert_from_path(str(pdf_path), dpi=self.dpi)
+                    
+                    # Convert PIL images to numpy arrays
+                    for pil_img in pil_images:
+                        # Convert to RGB if necessary
+                        if pil_img.mode != 'RGB':
+                            pil_img = pil_img.convert('RGB')
+                        
+                        # Convert to numpy array
+                        img_array = np.array(pil_img)
+                        images.append(img_array)
+                    
+                    logger.info(f"Successfully converted {len(images)} pages from PDF")
+                    
+                except ImportError:
+                    raise ValueError(
+                        "pdf2image library is required for PDF processing. "
+                        "Install with: pip install pdf2image"
+                    )
+                except PDFInfoNotInstalledError:
+                    raise ValueError(
+                        "poppler-utils is required for PDF processing. "
+                        "Install with: sudo apt-get install poppler-utils (Linux) "
+                        "or brew install poppler (macOS)"
+                    )
+                except (PDFPageCountError, Exception) as e:
+                    raise ValueError(f"Failed to convert PDF to images: {e}")
             
             elif pdf_path.is_dir():
                 # Directory with images
