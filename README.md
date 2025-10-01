@@ -327,98 +327,18 @@ az container create --resource-group myResourceGroup \
 
 ## 🔧 Troubleshooting
 
-### Common Setup Issues
+Having issues? Check our comprehensive troubleshooting guide:
 
-#### "No module named 'azure'" Error
-```bash
-pip install -r requirements.txt
-```
+📋 **[Complete Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
 
-#### "Storage account not found" Error
-- Verify storage account name is correct in `.env`
-- Check that storage account exists in Azure Portal
-- Ensure connection string is complete and valid
+Common quick fixes:
 
-#### "Container not found" Error  
-- Create container named `pdfs` in your storage account
-- Or update `AZURE_STORAGE_CONTAINER_NAME` in `.env`
+- **Azure connection issues**: Run `python tests/test_azure_connection.py`
+- **Module not found**: Ensure you're using the virtual environment: `.venv/bin/python`
+- **Permission errors**: Check Azure RBAC roles and connection strings
+- **System dependencies**: Install required libraries (see troubleshooting guide)
 
-#### "Authorization with Shared Key is disabled" Error
-This happens when your Azure Storage account has disabled shared key authentication. **Two solutions:**
-
-**Option 1: Enable Shared Key (Quickest)**
-1. Go to Azure Portal → Your Storage Account → Configuration
-2. Find "Allow shared key access" → Change to "Enabled"
-3. Click "Save"
-
-**Option 2: Use Azure Identity (More secure)**
-```bash
-# 1. Install Azure CLI first
-curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-# Or on macOS: brew install azure-cli
-# Or on Windows: winget install Microsoft.AzureCLI
-
-# 2. Install Azure Identity Python package
-pip install azure-identity
-
-# 3. Update your .env file - remove connection string, add these:
-AZURE_STORAGE_ACCOUNT_NAME=your_storage_account_name
-AZURE_STORAGE_CONTAINER_NAME=pdfs
-# Remove: AZURE_STORAGE_CONNECTION_STRING
-
-# 4. Login to Azure CLI
-az login
-```
-
-Then the system will automatically use your Azure credentials instead of connection strings.
-
-#### "AuthorizationPermissionMismatch" Error
-This happens when your user account lacks permissions to access the storage account. **Solutions:**
-
-**Option 1: Add Storage Permissions (Recommended)**
-1. Go to Azure Portal → Your Storage Account → Access Control (IAM)
-2. Click "Add" → "Add role assignment"
-3. Select one of these roles:
-   - **Storage Blob Data Contributor** (read/write access)
-   - **Storage Blob Data Reader** (read-only access)
-4. Search for your email/username and assign the role
-5. Wait 5-10 minutes for permissions to propagate
-
-**Option 2: Use Connection String Instead**
-```bash
-# In your .env file, add the connection string:
-AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
-```
-
-**Option 3: Check Your Subscription**
-```bash
-# Verify you're in the correct subscription
-az account show
-az account list --output table
-
-# Switch if needed
-az account set --subscription "your-subscription-name"
-```
-
-#### Can't access web interface
-```bash
-# Check if port 8000 is available
-python main_enhanced_hitl.py
-# Try different port if needed
-```
-
-### Getting Help
-
-1. **Check logs**: Most issues show helpful error messages
-2. **Validate setup**: `python main.py validate`  
-3. **Test connection**: Upload a PDF to your Azure container
-4. **View documentation**: [docs/guides/](docs/guides/) for detailed guides
-
-### Need Azure Help?
-
-- **Free Azure Account**: https://azure.microsoft.com/free/
-- **Azure Storage Tutorial**: https://docs.microsoft.com/en-us/azure/storage/
-- **Document Intelligence**: https://docs.microsoft.com/en-us/azure/applied-ai-services/form-recognizer/
+For detailed solutions to authentication, permission, and setup issues, see the [troubleshooting documentation](docs/TROUBLESHOOTING.md).
 
 ## 🤝 Contributing
 
