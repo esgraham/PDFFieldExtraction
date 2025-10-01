@@ -165,7 +165,7 @@ def main():
         
         print("\n💡 Usage examples:")
         print("   python main.py preprocessing --help")
-        print("   python examples/preprocessing_example.py")
+        print("   python main.py monitor  # To use preprocessing in pipeline")
         
         return True
         

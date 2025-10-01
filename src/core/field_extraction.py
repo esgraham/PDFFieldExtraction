@@ -24,8 +24,21 @@ import hashlib
 
 # Business logic imports
 from dateutil import parser as date_parser
+from dateutil.parser import ParserError
 import phonenumbers
+from phonenumbers import NumberParseException
 from email_validator import validate_email, EmailNotValidError
+
+# Optional imports with fallbacks
+try:
+    import validators
+    HAS_VALIDATORS = True
+except ImportError:
+    HAS_VALIDATORS = False
+    validators = None
+
+# Validation imports
+from .validation_engine import ValidationResult, LuhnValidator
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +322,13 @@ class AdvancedValidator:
             )
         
         try:
-            is_valid = validators.email(str(value))
+            if HAS_VALIDATORS and validators:
+                is_valid = validators.email(str(value))
+            else:
+                # Fallback to basic regex validation
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                is_valid = bool(re.match(email_pattern, str(value)))
+            
             return ValidationResult(
                 field_name=field_name,
                 is_valid=is_valid,
@@ -618,16 +637,6 @@ class DocumentSchema:
             self.business_rules = []
 
 @dataclass
-@dataclass
-class ValidationResult:
-    """Field validation result."""
-    field_name: str
-    is_valid: bool
-    severity: ValidationSeverity
-    message: str
-    rule_name: str
-    suggested_value: Any = None
-
 @dataclass
 class ExtractionResult:
     """Complete field extraction result."""

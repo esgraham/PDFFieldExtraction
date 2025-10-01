@@ -70,7 +70,7 @@ venv.bak/
 # Downloaded PDF files
 downloads/
 downloaded_pdfs/
-examples/downloads/
+
 
 # Logs
 *.log

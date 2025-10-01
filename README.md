@@ -65,12 +65,10 @@ PDFFieldExtraction/
 ├── 📁 web/                          # Web interface and templates
 ├── 📁 docs/                         # All documentation and guides
 ├── 📁 tests/                        # Unit and integration tests
-├── 📁 examples/                     # Usage examples
-├── 📁 demos/                        # Working demonstrations
 ├── 📁 config/                       # Configuration files
 ├── 📁 requirements/                 # All dependency files
-├── main_enhanced_hitl.py            # Enhanced HITL application (primary)
-└── main.py                          # Original application
+├── main_enhanced_hitl.py            # Enhanced HITL web interface
+└── main.py                          # PDF Processing Pipeline (primary)
 ```
 
 ## 🌐 API Endpoints
@@ -118,15 +116,6 @@ task_id = app.create_enhanced_review_task(
     extracted_fields=fields,
     validation_errors=errors
 )
-```
-
-### Run Examples
-```bash
-# Dashboard demo
-python demos/run_dashboard_demo.py
-
-# Basic monitoring
-python examples/simple_monitor.py
 ```
 
 ## ⚙️ Configuration
@@ -219,7 +208,27 @@ AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-region.cognitiveservices.azure
 AZURE_DOCUMENT_INTELLIGENCE_KEY=your_api_key
 ```
 
-> 💡 **The system automatically detects if Shared Key is disabled and falls back to Azure Identity**
+### � Authentication Methods Supported
+
+The system supports **flexible authentication** and automatically chooses the best method:
+
+1. **Connection String** (Traditional)
+   - Uses `AZURE_STORAGE_CONNECTION_STRING` 
+   - Works with shared key authentication
+   - Automatic fallback to managed identity if shared key is disabled
+
+2. **Azure Managed Identity** (Modern/Secure)
+   - No connection string required
+   - Uses your Azure login credentials (`az login`)
+   - Requires RBAC roles: `Storage Blob Data Reader` or `Storage Blob Data Contributor`
+   - Preferred for Azure-hosted applications
+
+3. **Automatic Detection & Fallback**
+   - System tries connection string first
+   - Falls back to managed identity if needed
+   - Provides clear error messages and guidance
+
+> 💡 **Test your authentication:** Run `python main.py validate` to verify configuration
 
 ### Step 4: Test Your Setup
 
@@ -234,26 +243,56 @@ python tests/test_azure_connection.py
 .venv/bin/python -c "from src.core.azure_pdf_listener import AzurePDFListener; print('✅ Setup successful!')"
 ```
 
-### Step 5: Start the System
+### Step 5: Start Processing PDFs
 
-#### Option A: Enhanced HITL Web Interface (Recommended)
+#### Option A: Complete Processing Pipeline (Recommended)
+Automatically monitor, process, and extract data from PDFs:
+
 ```bash
-python main_enhanced_hitl.py
+# Monitor Azure container and process new PDFs automatically
+.venv/bin/python main.py monitor
+
+# Process a specific PDF file
+.venv/bin/python main.py process filename.pdf
+
+# Batch process all PDFs in container
+.venv/bin/python main.py batch
+```
+
+#### Option B: Human-in-the-Loop Web Interface
+For manual review and correction of extracted data:
+
+```bash
+.venv/bin/python main_enhanced_hitl.py
 # Access at: http://localhost:8000
-# Click "Create Sample Task" to see the system in action
 ```
 
-#### Option B: Basic PDF Monitoring
+#### Option C: Combined System (Full Enterprise Solution)
+Run both automatic processing and HITL review:
+
+**Terminal 1 - Processing Pipeline:**
 ```bash
-python main.py simple
-# Monitors your Azure container for new PDF files
+.venv/bin/python main.py monitor
 ```
 
-#### Option C: Run Dashboard Demo (No Azure Required)
+**Terminal 2 - HITL Interface:**
 ```bash
-python demos/run_dashboard_demo.py
-# See analytics dashboard with sample data
+.venv/bin/python main_enhanced_hitl.py
 ```
+
+
+
+### 🔄 **Processing Pipeline Overview**
+
+When you run `main.py monitor`, each PDF goes through:
+
+1. **📥 Download** - Retrieves PDF from Azure Storage
+2. **🖼️ Preprocess** - Deskew, denoise, enhance for OCR
+3. **🏷️ Classify** - Determines document type (invoice, receipt, etc.)
+4. **📄 OCR/HWR** - Extracts text and handwritten content
+5. **🔍 Extract** - Identifies structured fields (amounts, dates, names)
+6. **✅ Validate** - Applies business rules and data validation
+7. **📊 Summarize** - Outputs JSON results with confidence scores
 
 ### Step 6: Upload Test PDF
 
@@ -265,12 +304,12 @@ python demos/run_dashboard_demo.py
    - If running HITL system: Check http://localhost:8000
    - If running basic monitor: Watch console output
 
-### 🎯 Quick Test Without Azure
+### 🎯 Quick Test
 
-Want to see the system first? Run the demo:
+Test your setup:
 ```bash
-python demos/run_dashboard_demo.py
-# Opens browser with working dashboard and sample data
+python main.py validate
+# Validates your Azure configuration
 ```
 
 ### 🎉 What's Next?

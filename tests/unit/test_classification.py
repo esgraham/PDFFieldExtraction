@@ -221,7 +221,7 @@ def main():
     print("\n💡 Next Steps:")
     if "scikit-learn" not in [dep for dep, _ in results if dep == "Dependencies"]:
         print("   • Install scikit-learn: pip install scikit-learn")
-    print("   • Run full demo: python examples/classification_example.py")
+    print("   • Run processing pipeline: python main.py monitor")
     print("   • See integration: python main.py classification")
     
     return passed == len(results)

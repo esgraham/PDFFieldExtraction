@@ -88,6 +88,36 @@ This occurs when corporate policies prevent shared key access at the tenant leve
 3. Login with Azure CLI: `az login`
 4. Test connection: `python tests/test_azure_connection.py`
 
+### "Firewalls and virtual networks settings may be blocking access" Error
+This happens when your storage account has network restrictions enabled and your IP address isn't allowed.
+
+**Solution Option 1: Add Your IP Address (Recommended)**
+1. Go to Azure Portal → Your Storage Account → **Networking**
+2. Under "Firewalls and virtual networks"
+3. Click **"Add your client IP address"** (it will show your current IP)
+4. Click **"Save"**
+5. Wait 2-3 minutes for changes to propagate
+
+**Solution Option 2: Allow All Networks (Less Secure)**
+1. Go to Azure Portal → Your Storage Account → **Networking**
+2. Select **"Enabled from all networks"**
+3. Click **"Save"**
+
+**Solution Option 3: Via Azure CLI**
+```bash
+# Add your current IP (replace with your IP address)
+az storage account network-rule add \
+    --account-name your_storage_account_name \
+    --resource-group your_resource_group \
+    --ip-address 174.182.122.183
+
+# Or allow all networks
+az storage account update \
+    --name your_storage_account_name \
+    --resource-group your_resource_group \
+    --default-action Allow
+```
+
 ### Can't access web interface
 ```bash
 # Check if port 8000 is available

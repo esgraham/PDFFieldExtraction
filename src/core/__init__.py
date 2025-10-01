@@ -14,14 +14,14 @@ from .azure_pdf_listener import AzurePDFListener
 from .pdf_preprocessor import PDFPreprocessor
 from .document_classifier import DocumentClassifier
 from .azure_document_intelligence import AzureDocumentIntelligenceOCR as AzureDocumentIntelligence
-from .field_extraction import FieldExtractionEngine
-from .validation_engine import ValidationEngine
+from .field_extraction import FieldExtractor
+from .validation_engine import ComprehensiveValidator
 
 __all__ = [
     'AzurePDFListener',
     'PDFPreprocessor', 
     'DocumentClassifier',
     'AzureDocumentIntelligence',
-    'FieldExtractionEngine',
-    'ValidationEngine'
+    'FieldExtractor',
+    'ComprehensiveValidator'
 ]
