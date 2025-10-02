@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - PDF Field Extraction</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/css/dashboard.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-file-pdf me-2"></i>PDF Field Extraction Dashboard
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="fas fa-home me-1"></i>Overview</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard/executive"><i class="fas fa-chart-line me-1"></i>Executive</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard/operational"><i class="fas fa-cogs me-1"></i>Operational</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard/technical"><i class="fas fa-server me-1"></i>Technical</a>
+                    </li>
+                </ul>
+                <span class="navbar-text">
+                    <i class="fas fa-clock me-1"></i>Last Updated: <span id="lastUpdated">{{ current_time }}</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Status Bar -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card bg-light">
+                    <div class="card-body py-2">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <h5 class="mb-0">System Status</h5>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="d-flex justify-content-end">
+                                    <span class="badge bg-success me-2" id="systemStatus">
+                                        <i class="fas fa-check-circle me-1"></i>Online
+                                    </span>
+                                    <button class="btn btn-sm btn-outline-primary" id="refreshBtn">
+                                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="row mb-4">
+            <div class="col-xl-3 col-md-6 mb-3">
+                <div class="card border-success">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title text-success">Overall Accuracy</h6>
+                                <h3 class="mb-0" id="overallAccuracy">--</h3>
+                            </div>
+                            <div class="text-success">
+                                <i class="fas fa-bullseye fa-2x"></i>
+                            </div>
+                        </div>
+                        <small class="text-muted">Last 7 days</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-xl-3 col-md-6 mb-3">
+                <div class="card border-info">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title text-info">STP Rate</h6>
+                                <h3 class="mb-0" id="stpRate">--</h3>
+                            </div>
+                            <div class="text-info">
+                                <i class="fas fa-forward fa-2x"></i>
+                            </div>
+                        </div>
+                        <small class="text-muted">Straight-through processing</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-xl-3 col-md-6 mb-3">
+                <div class="card border-warning">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title text-warning">Throughput</h6>
+                                <h3 class="mb-0" id="throughput">--</h3>
+                            </div>
+                            <div class="text-warning">
+                                <i class="fas fa-tachometer-alt fa-2x"></i>
+                            </div>
+                        </div>
+                        <small class="text-muted">Documents per hour</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-xl-3 col-md-6 mb-3">
+                <div class="card border-primary">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title text-primary">Cost per Doc</h6>
+                                <h3 class="mb-0" id="costPerDoc">--</h3>
+                            </div>
+                            <div class="text-primary">
+                                <i class="fas fa-dollar-sign fa-2x"></i>
+                            </div>
+                        </div>
+                        <small class="text-muted">Average processing cost</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row mb-4">
+            <div class="col-lg-6 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-chart-line me-2"></i>Processing Trends</h6>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="trendsChart" height="300"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Document Types</h6>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="documentTypesChart" height="300"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div class="row mb-4">
+            <div class="col-lg-8 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-clock me-2"></i>Performance Metrics</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="metric-item">
+                                    <strong>P50 Latency:</strong>
+                                    <span id="latencyP50" class="float-end">--</span>
+                                </div>
+                                <div class="metric-item">
+                                    <strong>P95 Latency:</strong>
+                                    <span id="latencyP95" class="float-end">--</span>
+                                </div>
+                                <div class="metric-item">
+                                    <strong>SLA Adherence:</strong>
+                                    <span id="slaAdherence" class="float-end">--</span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="metric-item">
+                                    <strong>Time to Review:</strong>
+                                    <span id="timeToReview" class="float-end">--</span>
+                                </div>
+                                <div class="metric-item">
+                                    <strong>Time to Resolution:</strong>
+                                    <span id="timeToResolution" class="float-end">--</span>
+                                </div>
+                                <div class="metric-item">
+                                    <strong>Exception Rate:</strong>
+                                    <span id="exceptionRate" class="float-end">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4 mb-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Top Exceptions</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="topExceptions">
+                            <div class="text-center text-muted">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0"><i class="fas fa-list me-2"></i>Recent Processing Activity</h6>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="timeRange" id="range1d" value="1" checked>
+                            <label class="btn btn-outline-primary" for="range1d">1D</label>
+                            
+                            <input type="radio" class="btn-check" name="timeRange" id="range7d" value="7">
+                            <label class="btn btn-outline-primary" for="range7d">7D</label>
+                            
+                            <input type="radio" class="btn-check" name="timeRange" id="range30d" value="30">
+                            <label class="btn btn-outline-primary" for="range30d">30D</label>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="recentActivityTable">
+                                <thead>
+                                    <tr>
+                                        <th>Document ID</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Processing Time</th>
+                                        <th>Cost</th>
+                                        <th>Timestamp</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted">Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

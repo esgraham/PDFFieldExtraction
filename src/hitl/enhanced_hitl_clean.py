@@ -205,7 +205,12 @@ class PDFProcessor:
 class EnhancedHITLDatabase:
     """Enhanced database for HITL review tasks with training data storage."""
     
-    def __init__(self, db_path: str = "enhanced_hitl.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # Default to data/databases folder
+            from pathlib import Path
+            project_root = Path(__file__).parent.parent.parent
+            db_path = str(project_root / "data" / "databases" / "enhanced_hitl.db")
         self.db_path = db_path
         self.init_database()
     
@@ -346,7 +351,7 @@ class EnhancedHITLDatabase:
 class EnhancedHITLReviewApp:
     """Enhanced HITL Review Application with PDF viewer and training data collection."""
     
-    def __init__(self, database_path: str = "enhanced_hitl.db"):
+    def __init__(self, database_path: str = None):
         self.database = EnhancedHITLDatabase(database_path)
         self.pdf_processor = PDFProcessor()
         self.reviewers: Dict[str, ReviewerInfo] = {}

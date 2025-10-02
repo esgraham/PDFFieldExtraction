@@ -1,288 +1,131 @@
 # Enhanced PDF Field Extraction System
 
-A comprehensive Azure-based PDF processing pipeline with advanced human-in-the-loop review, machine learning validation, and real-time analytics.
+An Azure-based PDF processing pipeline with automated extraction, human-in-the-loop review, and comprehensive analytics dashboard.
 
 ## ✨ Key Features
 
-### 📥 Azure Storage Integration
-- Automatic PDF file detection and monitoring
-- Event-driven processing with real-time notifications
-- Secure file handling with Azure Identity
+**🔄 Automated Processing Pipeline**
+- Azure Storage integration with real-time monitoring
+- Advanced OCR with Azure Document Intelligence v4
+- AI-powered preprocessing (deskew, denoise, enhance)
+- Smart document classification and field extraction
+- Comprehensive validation with business rules
 
-### 🖼️ Advanced Preprocessing
-- AI-powered Hough/Radon-based deskew correction
-- Adaptive Gaussian blur denoising
-- OpenCV optimization pipelines
-- Image quality enhancement for optimal OCR
+**👥 Human-in-the-Loop System**
+- Interactive PDF viewer with bounding box overlays
+- Field correction interface with confidence scoring
+- SLA tracking and automatic reviewer assignment
+- Training data collection for ML improvement
 
-### 🤖 Document Classification
-- Multi-modal layout + text feature extraction
-- Advanced scikit-learn classification models
-- Transformer-ready architecture for scaling
-- Confidence-based routing and fallback
-
-### 📄 OCR Processing
-- Azure Document Intelligence v4 integration
-- Handwritten text recognition capabilities
-- Advanced table and form extraction
-- Multi-language support and confidence scoring
-
-### 🏷️ Enhanced Field Extraction
-- Template-light forms processing engine
-- Custom extraction models with bounding boxes
-- Multi-confidence scoring and validation
-- Synonym mapping and canonical schema
-
-### ✅ Advanced Validation & Rules
-- Comprehensive regex pattern validation
-- Luhn algorithm and checksum verification
-- Cross-field consistency and business rules
-- Real-time validation with error reporting
-
-### 👥 Enhanced HITL System
-- **Interactive PDF Viewer**: Side-by-side display with bounding box overlays
-- **Field Correction Interface**: Confidence scores and rule violation highlights
-- **SLA Tracking**: Priority-based assignment with age-to-resolution metrics
-- **Training Data Collection**: Automated ML improvement from reviewer feedback
-- **Real-time Assignment**: Specialized reviewer routing with workload balancing
-
-### 📊 Comprehensive Dashboard
-- **Real-time Analytics**: Queue status, throughput, and performance KPIs
-- **Training Insights**: Field correction patterns and model improvement data
-- **Operational Metrics**: SLA compliance, reviewer performance, and bottleneck analysis
-- **Deterministic Summaries**: JSON-to-Markdown conversion with PII masking
-- **Interactive Interface**: Auto-refresh dashboard with drill-down capabilities
+**📊 Multi-View Analytics Dashboard**
+- **Executive**: KPIs, ROI metrics, business impact
+- **Operational**: Real-time metrics, alerts, queue management
+- **Technical**: System health, resource usage, API performance
+- Interactive charts, real-time updates, alert system
 
 ## 🏗️ Architecture
 
-### 📁 Project Structure
 ```
 PDFFieldExtraction/
-├── 📁 src/                          # Core source code
-│   ├── 📁 core/                     # Processing pipeline (Azure, OCR, validation)
-│   ├── 📁 hitl/                     # Human-in-the-loop system
-│   └── 📁 dashboard/                # Analytics and KPI dashboard
-├── 📁 web/                          # Web interface and templates
-├── 📁 docs/                         # All documentation and guides
-├── 📁 tests/                        # Unit and integration tests
-├── 📁 config/                       # Configuration files
-├── 📁 requirements/                 # All dependency files
-├── main_enhanced_hitl.py            # Enhanced HITL web interface
-└── main.py                          # PDF Processing Pipeline (primary)
+├── src/
+│   ├── core/          # Processing pipeline
+│   ├── hitl/          # Human-in-the-loop system
+│   └── dashboard/     # Analytics dashboard
+├── data/
+│   └── databases/     # SQLite databases (demo & production)
+├── templates/         # Dashboard HTML templates
+├── static/           # Dashboard assets (CSS, JS)
+├── config/           # Configuration files
+└── requirements/     # Dependency files
 ```
 
-## 🌐 API Endpoints
+**Entry Points:**
+- `main.py` - Core PDF processing pipeline
+- `main_enhanced_hitl.py` - HITL web interface
+- `src/dashboard/run_dashboard_demo.py` - Analytics dashboard
 
-### Enhanced HITL System
-- `GET /` - Main dashboard interface
-- `POST /api/create-sample-task` - Create demo task
-- `GET /review/{task_id}` - Task review interface
-- `POST /api/tasks/{task_id}/complete` - Complete review
+## 🌐 System Components
 
-### Core Processing
-- `GET /health` - System health check
-- `POST /process` - Process uploaded PDF
-- `GET /status/{job_id}` - Processing status
-
-## 💻 Usage Examples
-
-### Basic PDF Monitoring
-```python
-from src.core.azure_pdf_listener import AzurePDFListener
-
-listener = AzurePDFListener(
-    storage_account_name="your_account",
-    container_name="pdfs",
-    connection_string="your_connection_string"
-)
-
-def handle_new_pdf(blob_name, blob_client):
-    print(f"New PDF detected: {blob_name}")
-    # Add your processing logic here
-
-listener.set_pdf_callback(handle_new_pdf)
-listener.start_polling()
+**Core Processing**: `main.py`
+```bash
+python main.py monitor     # Continuous monitoring
+python main.py process     # Process specific file
+python main.py batch       # Batch process all files
+python main.py info        # Show environment info
 ```
 
-### Enhanced HITL System
-```python
-from src.hitl.enhanced_hitl_clean import EnhancedHITLReviewApp
+**HITL Interface**: `main_enhanced_hitl.py` (Port 8000)
+- Interactive PDF review and field correction
+- SLA tracking and reviewer assignment
 
-# Start enhanced HITL system
-app = EnhancedHITLReviewApp()
-task_id = app.create_enhanced_review_task(
-    document_id="DOC-001",
-    document_type="invoice", 
-    extracted_fields=fields,
-    validation_errors=errors
-)
+**Analytics Dashboard**: `src/dashboard/run_dashboard_demo.py` (Port 8000)
+- Executive, Operational, and Technical views
+- Real-time KPIs and system monitoring
+
+## 💻 Quick Start
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements/requirements.txt
+# For full features: pip install -r requirements/requirements_complete.txt
+# For dashboard: pip install -r requirements/requirements_dashboard.txt
 ```
 
-## ⚙️ Configuration
+### 2. Configure Azure
+```bash
+# Create sample configuration
+python main.py config
 
+# Edit .env with your Azure credentials
+# AZURE_STORAGE_ACCOUNT_NAME=your_account
+# AZURE_STORAGE_CONTAINER_NAME=pdfs
+# AZURE_STORAGE_CONNECTION_STRING=your_connection_string
+```
 
-## 🚀 Getting Started
+### 3. Run System
+```bash
+# Core processing pipeline
+python main.py monitor
+
+# HITL review interface
+python main_enhanced_hitl.py
+
+# Analytics dashboard  
+python src/dashboard/run_dashboard_demo.py
+```
+
+## 🚀 Setup
 
 ### Prerequisites
-- Python 3.8+ installed
-- Azure account (free tier works fine)
-- Git (to clone the repository)
+- Python 3.8+
+- Azure Storage Account with blob container
+- Optional: Azure Document Intelligence for advanced OCR
 
-### Step 1: Azure Setup (Required)
+### Azure Setup
+1. Create Azure Storage Account
+2. Create a container (e.g., `pdfs`)
+3. Get connection string or use Azure Identity
+4. Optional: Create Document Intelligence resource
 
-#### Create Azure Storage Account
-1. **Login to Azure Portal**: https://portal.azure.com
-2. **Create Storage Account**:
-   - Click "Create a resource" → "Storage account"
-   - Choose subscription and resource group
-   - Enter storage account name (must be globally unique)
-   - Select region and performance tier
-   - Click "Review + create"
-
-3. **Create PDF Container**:
-   - Go to your storage account → "Containers"
-   - Click "+ Container"
-   - Name: `pdfs` (or your preferred name)
-   - Public access level: "Private"
-
-4. **Get Authentication Details**:
-   
-   **If using Connection String (traditional method)**:
-   - Go to "Access keys" in your storage account
-   - Copy "Connection string" from key1 or key2
-   
-   **If Shared Key is disabled (enterprise environments)**:
-   - Just note your storage account name
-   - You'll use Azure Identity instead (see Step 3 configuration options)
-
-#### Optional: Azure Document Intelligence (for advanced OCR)
-1. **Create Document Intelligence Resource**:
-   - Search "Document Intelligence" in Azure Portal
-   - Click "Create" → Fill required fields
-   - Copy endpoint URL and API key after creation
-
-### Step 2: Local Setup
-
+### Installation
 ```bash
-# 1. Clone repository
+# Clone and install
 git clone <repository-url>
 cd PDFFieldExtraction
+pip install -r requirements/requirements.txt
 
-# 2. Install system dependencies (Linux/Ubuntu)
-sudo apt-get update
-sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1
-
-# 3. Install Python dependencies
-pip install -r requirements.txt
-# Or for full features: pip install -r requirements/requirements_complete.txt
-
-# 4. Setup configuration
-cp config/.env.example .env
+# Configure environment
+python main.py config  # Creates sample .env file
+# Edit .env with your Azure credentials
 ```
 
-### Step 3: Configure Environment
+### Authentication
+Supports flexible authentication:
+- **Connection String**: Traditional method with shared keys
+- **Azure Identity**: Modern approach using managed identity
+- **Automatic Fallback**: Tries connection string, falls back to identity
 
-Edit the `.env` file with your Azure credentials:
-
-**Option A: Connection String (Traditional)**
-```env
-# Required - Azure Storage
-AZURE_STORAGE_ACCOUNT_NAME=your_storage_account_name
-AZURE_STORAGE_CONTAINER_NAME=pdfs
-AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
-
-# Optional - Document Intelligence OCR
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-region.cognitiveservices.azure.com/
-AZURE_DOCUMENT_INTELLIGENCE_KEY=your_api_key
-```
-
-**Option B: Azure Identity (If Shared Key disabled)**
-```env
-# Required - Azure Storage (No connection string needed)
-AZURE_STORAGE_ACCOUNT_NAME=your_storage_account_name
-AZURE_STORAGE_CONTAINER_NAME=pdfs
-# Note: No AZURE_STORAGE_CONNECTION_STRING needed
-
-# Optional - Document Intelligence OCR
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-region.cognitiveservices.azure.com/
-AZURE_DOCUMENT_INTELLIGENCE_KEY=your_api_key
-```
-
-### � Authentication Methods Supported
-
-The system supports **flexible authentication** and automatically chooses the best method:
-
-1. **Connection String** (Traditional)
-   - Uses `AZURE_STORAGE_CONNECTION_STRING` 
-   - Works with shared key authentication
-   - Automatic fallback to managed identity if shared key is disabled
-
-2. **Azure Managed Identity** (Modern/Secure)
-   - No connection string required
-   - Uses your Azure login credentials (`az login`)
-   - Requires RBAC roles: `Storage Blob Data Reader` or `Storage Blob Data Contributor`
-   - Preferred for Azure-hosted applications
-
-3. **Automatic Detection & Fallback**
-   - System tries connection string first
-   - Falls back to managed identity if needed
-   - Provides clear error messages and guidance
-
-> 💡 **Test your authentication:** Run `python main.py validate` to verify configuration
-
-### Step 4: Test Your Setup
-
-```bash
-# Run connection test (recommended)
-.venv/bin/python tests/test_azure_connection.py
-
-# Or use Python directly if virtual environment activated
-python tests/test_azure_connection.py
-
-# Or test basic import
-.venv/bin/python -c "from src.core.azure_pdf_listener import AzurePDFListener; print('✅ Setup successful!')"
-```
-
-### Step 5: Start Processing PDFs
-
-#### Option A: Complete Processing Pipeline (Recommended)
-Automatically monitor, process, and extract data from PDFs:
-
-```bash
-# Monitor Azure container and process new PDFs automatically
-.venv/bin/python main.py monitor
-
-# Process a specific PDF file
-.venv/bin/python main.py process filename.pdf
-
-# Batch process all PDFs in container
-.venv/bin/python main.py batch
-```
-
-#### Option B: Human-in-the-Loop Web Interface
-For manual review and correction of extracted data:
-
-```bash
-.venv/bin/python main_enhanced_hitl.py
-# Access at: http://localhost:8000
-```
-
-#### Option C: Combined System (Full Enterprise Solution)
-Run both automatic processing and HITL review:
-
-**Terminal 1 - Processing Pipeline:**
-```bash
-.venv/bin/python main.py monitor
-```
-
-**Terminal 2 - HITL Interface:**
-```bash
-.venv/bin/python main_enhanced_hitl.py
-```
-
-
-
-### 🔄 **Processing Pipeline Overview**
+## 🔄 Processing Pipeline
 
 When you run `main.py monitor`, each PDF goes through:
 
@@ -294,90 +137,38 @@ When you run `main.py monitor`, each PDF goes through:
 6. **✅ Validate** - Applies business rules and data validation
 7. **📊 Summarize** - Outputs JSON results with confidence scores
 
-### Step 6: Upload Test PDF
-
-1. **Upload a PDF to your Azure container**:
-   - Go to Azure Portal → Your storage account → Containers → `pdfs`
-   - Click "Upload" and select a PDF file
-
-2. **Watch the system process it**:
-   - If running HITL system: Check http://localhost:8000
-   - If running basic monitor: Watch console output
-
-### 🎯 Quick Test
-
-Test your setup:
-```bash
-python main.py validate
-# Validates your Azure configuration
-```
-
-### 🎉 What's Next?
-
-Once you have the system running:
-
-1. **Upload PDFs**: Add PDF files to your Azure container
-2. **Review Tasks**: Use the HITL interface at http://localhost:8000
-3. **View Analytics**: Check the dashboard for processing metrics
-4. **Customize**: Modify validation rules in `src/core/validation_engine.py`
-5. **Scale**: Deploy to Azure Container Instances for production
-
-
-## 🧪 Testing
+## 🧪 Testing & Deployment
 
 ```bash
-# Run all tests
-python -m pytest tests/
+# Test setup
+python main.py info  # Show environment info
+python -m pytest tests/  # Run tests
 
-# Unit tests only
-python -m pytest tests/unit/
-
-# Integration tests
-python -m pytest tests/integration/
-
-# Test with coverage
-python -m pytest tests/ --cov=src
-```
-
-## 🚀 Production Deployment
-
-### Docker
-```bash
-# Build image
+# Docker deployment
 docker build -t pdf-extraction-system .
-
-# Run container
 docker run -p 8000:8000 --env-file .env pdf-extraction-system
-```
-
-### Azure Container Instances
-```bash
-az container create --resource-group myResourceGroup \
-    --name pdf-extraction --image myregistry.azurecr.io/pdf-extraction-system:latest \
-    --environment-variables AZURE_STORAGE_ACCOUNT_NAME=myaccount
 ```
 
 ## 📚 Documentation
 
-- **[Complete HITL System Guide](docs/guides/ENHANCED_HITL_SYSTEM.md)** - Full system documentation
-- **[Dashboard Guide](docs/guides/DASHBOARD_GUIDE.md)** - Analytics and KPI dashboard
-- **[API Reference](docs/api/api_reference.md)** - Complete API documentation
-- **[Configuration Guide](docs/configuration.md)** - Detailed setup instructions
+- **[Dashboard Guide](docs/guides/DASHBOARD_GUIDE.md)** - Analytics dashboard system
+- **[HITL System Guide](docs/guides/ENHANCED_HITL_SYSTEM.md)** - Human-in-the-loop documentation
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
-## 🔧 Troubleshooting
+## 🔧 Common Issues
 
-Having issues? Check our comprehensive troubleshooting guide:
+```bash
+# Test Azure connection
+python tests/test_azure_connection.py
 
-📋 **[Complete Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
+# Check environment
+python main.py info
 
-Common quick fixes:
+# Validate configuration
+python main.py config
+```
 
-- **Azure connection issues**: Run `python tests/test_azure_connection.py`
-- **Module not found**: Ensure you're using the virtual environment: `.venv/bin/python`
-- **Permission errors**: Check Azure RBAC roles and connection strings
-- **System dependencies**: Install required libraries (see troubleshooting guide)
-
-For detailed solutions to authentication, permission, and setup issues, see the [troubleshooting documentation](docs/TROUBLESHOOTING.md).
+For detailed troubleshooting, see the [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
 ## 🤝 Contributing
 

@@ -2,8 +2,86 @@
 Dashboard Web Application
 
 FastAPI-based web application for displaying KPIs, analytics, and summaries.
-Includes real-time monitoring and interactive visualizations.
-"""
+Includes real-time monitoring and interactive visua    def save_dashboard_snapshot(self, dashboard: KPIDashboard, template_type: str):
+        \"\"\"Save dashboard snapshot for caching.\"\"\"
+        with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
+            conn.execute(\"\"\"
+                INSERT INTO dashboard_snapshots 
+                (period_start, period_end, snapshot_data, template_type)
+                VALUES (?, ?, ?, ?)
+            \"\"\", (
+                dashboard.period_start,
+                dashboard.period_end,
+                json.dumps(dashboard, default=str),
+                template_type
+            ))
+    
+    def import_hitl_data(self, hitl_db_path: str = None):
+        \"\"\"Import data from HITL database for dashboard metrics.\"\"\"
+        if hitl_db_path is None:
+            project_root = Path(__file__).parent.parent.parent
+            hitl_db_path = str(project_root / \"data\" / \"databases\" / \"enhanced_hitl.db\")
+        
+        if not Path(hitl_db_path).exists():
+            logger.warning(f\"HITL database not found at {hitl_db_path}\")
+            return 0
+        
+        imported_count = 0
+        try:
+            with sqlite3.connect(hitl_db_path, detect_types=sqlite3.PARSE_DECLTYPES) as hitl_conn:
+                hitl_conn.row_factory = sqlite3.Row
+                
+                # Get completed HITL tasks that can be converted to document metrics
+                cursor = hitl_conn.execute(\"\"\"
+                    SELECT * FROM review_tasks 
+                    WHERE status IN ('completed', 'approved') 
+                    ORDER BY created_at DESC
+                \"\"\")
+                
+                hitl_tasks = [dict(row) for row in cursor.fetchall()]
+                
+                with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
+                    for task in hitl_tasks:
+                        # Convert HITL task to document metric
+                        processing_time = 5.0  # Default processing time for HITL tasks
+                        
+                        # Check if already imported
+                        existing = conn.execute(
+                            \"SELECT COUNT(*) FROM document_metrics WHERE document_id = ?\",
+                            (task['document_id'],)
+                        ).fetchone()[0]
+                        
+                        if existing > 0:
+                            continue
+                        
+                        conn.execute(\"\"\"
+                            INSERT INTO document_metrics 
+                            (document_id, document_type, processing_status, start_time, end_time,
+                             total_processing_time, field_count, hitl_required, hitl_reason,
+                             exception_type, cost_breakdown, confidence_scores)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        \"\"\", (
+                            task['document_id'],
+                            task['document_type'] or 'unknown',
+                            'success' if task['status'] == 'completed' else 'hitl_required',
+                            task['created_at'],
+                            task['completed_at'] or task['created_at'],
+                            processing_time,
+                            len(json.loads(task['extracted_fields'] or '{}').keys()) if task['extracted_fields'] else 0,
+                            True,  # All HITL tasks required human review
+                            task['validation_errors'] or 'Required human review',
+                            None,
+                            json.dumps({'hitl_review_cost': 2.50}),  # Estimated HITL review cost
+                            json.dumps({'overall': 0.75})  # Conservative confidence for HITL tasks
+                        ))
+                        imported_count += 1
+                
+                logger.info(f\"Imported {imported_count} HITL tasks as document metrics\")
+                return imported_count
+                
+        except Exception as e:
+            logger.error(f\"Error importing HITL data: {e}\")
+            return 0"
 
 from fastapi import FastAPI, Request, HTTPException, Query, Depends
 from fastapi.templating import Jinja2Templates
@@ -50,9 +128,101 @@ class DashboardDatabase:
         if db_path is None:
             # Default to production database in data/databases folder
             project_root = Path(__file__).parent.parent.parent
-            self.db_path = str(project_root / "data" / "databases" / "dashboard.db")
+            self.db_path = str(project_root / "data" / "databases" / "dashboard_production.db")
         else:
             self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize database tables."""
+        with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS document_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id TEXT UNIQUE,
+                    document_type TEXT,
+                    processing_status TEXT,
+                    start_time TIMESTAMP,
+                    end_time TIMESTAMP,
+                    total_processing_time REAL,
+                    field_count INTEGER,
+                    hitl_required BOOLEAN,
+                    hitl_reason TEXT,
+                    exception_type TEXT,
+                    cost_breakdown TEXT,
+                    confidence_scores TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS field_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    field_name TEXT,
+                    document_type TEXT,
+                    precision REAL,
+                    recall REAL,
+                    f1_score REAL,
+                    accuracy REAL,
+                    total_predictions INTEGER,
+                    confidence_avg REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dashboard_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    period_start TIMESTAMP,
+                    period_end TIMESTAMP,
+                    snapshot_data TEXT,
+                    template_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+    
+    def store_document_metric(self, metric: DocumentMetrics):
+        """Store document processing metric."""
+        with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO document_metrics 
+                (document_id, document_type, processing_status, start_time, end_time,
+                 total_processing_time, field_count, hitl_required, hitl_reason,
+                 exception_type, cost_breakdown, confidence_scores)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                metric.document_id,
+                metric.document_type.value,
+                metric.processing_status.value,
+                metric.start_time,
+                metric.end_time,
+                metric.total_processing_time,
+                metric.field_count,
+                metric.hitl_required,
+                metric.hitl_reason,
+                metric.exception_type,
+                json.dumps(metric.cost_breakdown) if metric.cost_breakdown else None,
+                json.dumps(metric.confidence_scores) if metric.confidence_scores else None
+            ))
+    
+    def store_field_metric(self, metric: FieldMetrics):
+        """Store field-level quality metric."""
+        with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
+            conn.execute("""
+                INSERT INTO field_metrics 
+                (field_name, document_type, precision, recall, f1_score, accuracy,
+                 total_predictions, confidence_avg)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                metric.field_name,
+                metric.document_type,
+                metric.precision,
+                metric.recall,
+                metric.f1_score,
+                metric.accuracy,
+                metric.total_predictions,
+                metric.confidence_avg
+            ))
     
     def get_metrics_for_period(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
         """Get document metrics for specified period."""
@@ -78,73 +248,6 @@ class DashboardDatabase:
                 json.dumps(dashboard, default=str),
                 template_type
             ))
-    
-    def import_hitl_data(self, hitl_db_path: str = None):
-        """Import data from HITL database for dashboard metrics."""
-        if hitl_db_path is None:
-            project_root = Path(__file__).parent.parent.parent
-            hitl_db_path = str(project_root / "data" / "databases" / "enhanced_hitl.db")
-        
-        if not Path(hitl_db_path).exists():
-            logger.warning(f"HITL database not found at {hitl_db_path}")
-            return 0
-        
-        imported_count = 0
-        try:
-            with sqlite3.connect(hitl_db_path, detect_types=sqlite3.PARSE_DECLTYPES) as hitl_conn:
-                hitl_conn.row_factory = sqlite3.Row
-                
-                # Get completed HITL tasks that can be converted to document metrics
-                cursor = hitl_conn.execute("""
-                    SELECT * FROM review_tasks 
-                    WHERE status IN ('completed', 'approved') 
-                    ORDER BY created_at DESC
-                """)
-                
-                hitl_tasks = [dict(row) for row in cursor.fetchall()]
-                
-                with sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
-                    for task in hitl_tasks:
-                        # Convert HITL task to document metric
-                        processing_time = 5.0  # Default processing time for HITL tasks
-                        
-                        # Check if already imported
-                        existing = conn.execute(
-                            "SELECT COUNT(*) FROM document_metrics WHERE document_id = ?",
-                            (task['document_id'],)
-                        ).fetchone()[0]
-                        
-                        if existing > 0:
-                            continue
-                        
-                        conn.execute("""
-                            INSERT INTO document_metrics 
-                            (document_id, document_type, processing_status, start_time, end_time,
-                             total_processing_time, field_count, hitl_required, hitl_reason,
-                             exception_type, cost_breakdown, confidence_scores)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            task['document_id'],
-                            task['document_type'] or 'unknown',
-                            'success' if task['status'] == 'completed' else 'hitl_required',
-                            task['created_at'],
-                            task['completed_at'] or task['created_at'],
-                            processing_time,
-                            len(json.loads(task['extracted_fields'] or '{}').keys()) if task['extracted_fields'] else 0,
-                            True,  # All HITL tasks required human review
-                            task['validation_errors'] or 'Required human review',
-                            None,
-                            json.dumps({'hitl_review_cost': 2.50}),  # Estimated HITL review cost
-                            json.dumps({'overall': 0.75})  # Conservative confidence for HITL tasks
-                        ))
-                        imported_count += 1
-                
-                logger.info(f"Imported {imported_count} HITL tasks as document metrics")
-                return imported_count
-                
-        except Exception as e:
-            logger.error(f"Error importing HITL data: {e}")
-            return 0
 
 # Global instances
 analytics_engine = AnalyticsEngine()
@@ -159,12 +262,8 @@ async def lifespan(app: FastAPI):
     # Startup: Load real data from database
     logger.info("Starting dashboard application...")
     
-    # Try to import data from HITL system first
-    hitl_imported = dashboard_db.import_hitl_data()
-    if hitl_imported > 0:
-        logger.info(f"✅ Imported {hitl_imported} HITL tasks as document metrics")
-    
     # Load existing real data from database
+    from datetime import datetime, timedelta
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365)  # Load last year of data
     
@@ -414,51 +513,6 @@ async def health_check():
             "llm_service": "online" if llm_service.client else "offline"
         }
     }
-
-@app.post("/api/import-hitl-data")
-async def import_hitl_data():
-    """Manually trigger import of HITL data into dashboard metrics."""
-    try:
-        imported_count = dashboard_db.import_hitl_data()
-        
-        # Reload analytics engine with new data
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365)
-        existing_metrics = dashboard_db.get_metrics_for_period(start_date, end_date)
-        
-        # Clear and reload analytics engine
-        analytics_engine.document_metrics.clear()
-        for metric_dict in existing_metrics:
-            doc_metric = DocumentMetrics(
-                document_id=metric_dict['document_id'],
-                document_type=DocumentType(metric_dict['document_type']),
-                processing_status=ProcessingStatus(metric_dict['processing_status']),
-                start_time=metric_dict['start_time'],
-                end_time=metric_dict['end_time'],
-                total_processing_time=metric_dict['total_processing_time'],
-                field_count=metric_dict['field_count'],
-                hitl_required=bool(metric_dict['hitl_required']),
-                hitl_reason=metric_dict['hitl_reason'],
-                exception_type=metric_dict['exception_type'],
-                confidence_scores=json.loads(metric_dict['confidence_scores']) if metric_dict['confidence_scores'] else {},
-                cost_breakdown=json.loads(metric_dict['cost_breakdown']) if metric_dict['cost_breakdown'] else {},
-                ocr_time=metric_dict['total_processing_time'] * 0.4,
-                extraction_time=metric_dict['total_processing_time'] * 0.3,
-                validation_time=metric_dict['total_processing_time'] * 0.2,
-                validation_errors=[]
-            )
-            analytics_engine.add_document_metric(doc_metric)
-        
-        return {
-            "success": True,
-            "imported_count": imported_count,
-            "total_metrics": len(existing_metrics),
-            "message": f"Successfully imported {imported_count} HITL tasks as document metrics"
-        }
-    
-    except Exception as e:
-        logger.error(f"Error importing HITL data: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error importing HITL data: {str(e)}")
 
 @app.get("/dashboard/executive", response_class=HTMLResponse)
 async def executive_dashboard(request: Request):
