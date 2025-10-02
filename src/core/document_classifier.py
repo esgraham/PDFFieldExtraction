@@ -1466,6 +1466,7 @@ class DocumentClassifier:
         if not document.fields:
             return 0.0
         
+        #TODO:  Update this code with experiment to use AI to match the fields
         # Calculate confidence based on number and quality of detected fields
         field_confidences = []
         expected_fields = self._get_expected_fields_for_doc_type(doc_type)
