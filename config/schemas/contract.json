@@ -1,0 +1,141 @@
+{
+  "template_type": "contract",
+  "version": "1.0",
+  "required_confidence": 0.8,
+  "fields": [
+    {
+      "name": "contract_title",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "title",
+        "agreement title",
+        "contract name"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "confidence_threshold": 0.7
+    },
+    {
+      "name": "parties",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "between",
+        "party",
+        "contracting parties",
+        "signatories"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "min_length:5"
+      ],
+      "confidence_threshold": 0.8,
+      "description": "Names of contracting parties"
+    },
+    {
+      "name": "contract_date",
+      "field_type": "date",
+      "required": true,
+      "synonyms": [
+        "date",
+        "effective date",
+        "execution date",
+        "signed on"
+      ],
+      "validation_rules": [
+        "valid_date"
+      ],
+      "confidence_threshold": 0.8
+    },
+    {
+      "name": "effective_date",
+      "field_type": "date",
+      "required": false,
+      "synonyms": [
+        "starts on",
+        "begins",
+        "commences"
+      ],
+      "validation_rules": [
+        "valid_date"
+      ]
+    },
+    {
+      "name": "expiration_date",
+      "field_type": "date",
+      "required": false,
+      "synonyms": [
+        "expires",
+        "ends",
+        "termination date",
+        "until"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "after_effective_date"
+      ]
+    },
+    {
+      "name": "contract_value",
+      "field_type": "currency",
+      "required": false,
+      "synonyms": [
+        "amount",
+        "value",
+        "consideration",
+        "payment"
+      ],
+      "validation_rules": [
+        "positive_amount"
+      ]
+    },
+    {
+      "name": "terms",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "conditions",
+        "provisions",
+        "clauses"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "description": "Key terms and conditions"
+    },
+    {
+      "name": "signatures",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "signed by",
+        "signature",
+        "executed by"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "description": "Signature information"
+    },
+    {
+      "name": "governing_law",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "jurisdiction",
+        "governed by",
+        "applicable law"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ]
+    }
+  ],
+  "business_rules": [
+    "expiration_after_effective_date",
+    "parties_must_be_identified",
+    "signatures_match_parties"
+  ]
+}

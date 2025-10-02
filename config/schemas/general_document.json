@@ -1,0 +1,159 @@
+{
+  "template_type": "general_document",
+  "version": "1.0",
+  "required_confidence": 0.6,
+  "fields": [
+    {
+      "name": "document_title",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "title",
+        "subject",
+        "heading"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "confidence_threshold": 0.7
+    },
+    {
+      "name": "document_date",
+      "field_type": "date",
+      "required": false,
+      "synonyms": [
+        "date",
+        "created",
+        "dated"
+      ],
+      "validation_rules": [
+        "valid_date"
+      ],
+      "confidence_threshold": 0.7
+    },
+    {
+      "name": "author",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "by",
+        "from",
+        "prepared by",
+        "written by"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ]
+    },
+    {
+      "name": "content",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "text",
+        "body",
+        "content"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "min_length:50"
+      ],
+      "confidence_threshold": 0.6,
+      "description": "Main document content"
+    },
+    {
+      "name": "pages",
+      "field_type": "number",
+      "required": false,
+      "synonyms": [
+        "page count",
+        "total pages",
+        "number of pages"
+      ],
+      "validation_rules": [
+        "positive_number"
+      ],
+      "description": "Total number of pages"
+    },
+    {
+      "name": "language",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "lang",
+        "language"
+      ],
+      "validation_rules": [
+        "valid_language_code"
+      ]
+    },
+    {
+      "name": "key_phrases",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "keywords",
+        "key terms",
+        "important phrases"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "description": "Important phrases or keywords extracted from document"
+    },
+    {
+      "name": "document_type",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "type",
+        "category",
+        "classification"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "description": "Inferred document type or category"
+    },
+    {
+      "name": "confidence_score",
+      "field_type": "number",
+      "required": false,
+      "synonyms": [
+        "confidence",
+        "score",
+        "accuracy"
+      ],
+      "validation_rules": [
+        "between_0_and_1"
+      ],
+      "description": "Overall confidence in document analysis"
+    }
+  ],
+  "tables": [
+    {
+      "name": "extracted_tables",
+      "header_required": false,
+      "min_rows": 0,
+      "columns": [
+        {
+          "name": "table_data",
+          "field_type": "text",
+          "required": false,
+          "description": "Extracted table content"
+        }
+      ]
+    }
+  ],
+  "key_value_pairs": [
+    {
+      "name": "metadata",
+      "description": "Any key-value pairs found in the document",
+      "required": false
+    }
+  ],
+  "business_rules": [
+    "content_not_empty",
+    "reasonable_confidence_score"
+  ]
+}

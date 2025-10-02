@@ -7,7 +7,7 @@ This package contains the core functionality for:
 - Document classification
 - OCR integration with Azure Document Intelligence
 - Field extraction and validation
-- Integration components
+- Pipeline orchestration and configuration management
 """
 
 # Lazy imports to avoid slow startup with heavy dependencies like PyTorch
@@ -19,5 +19,9 @@ __all__ = [
     'DocumentClassifier',
     'AzureDocumentIntelligence',
     'FieldExtractor',
-    'ComprehensiveValidator'
+    'ComprehensiveValidator',
+    'PDFProcessingPipeline',
+    'PDFMonitorService',
+    'ConfigurationManager',
+    'ResultHandler'
 ]

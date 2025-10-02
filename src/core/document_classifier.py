@@ -34,10 +34,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-# Optional transformer support - use lazy import to avoid slow startup
-TRANSFORMERS_AVAILABLE = False
-_sentence_transformer_module = None
-
 def _get_sentence_transformer():
     """Lazy import of sentence transformers to avoid slow startup."""
     global _sentence_transformer_module, TRANSFORMERS_AVAILABLE
@@ -58,14 +54,19 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
+# Azure Document Intelligence support
+try:
+    from azure.ai.documentintelligence import DocumentIntelligenceClient, DocumentIntelligenceAdministrationClient
+    from azure.ai.documentintelligence.models import AnalyzeDocumentRequest, AnalyzeResult
+    from azure.core.credentials import AzureKeyCredential
+    AZURE_DOC_INTEL_AVAILABLE = True
+except ImportError:
+    AZURE_DOC_INTEL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
-class DocumentClass(Enum):
-    """Document classification categories."""
-    CLASS_A = "A"  # Primary document type (e.g., invoices, contracts)
-    CLASS_B = "B"  # Secondary document type (e.g., forms, reports)
-    CLASS_C = "C"  # Tertiary document type (e.g., correspondence, misc)
-    UNKNOWN = "UNKNOWN"
+# Document types are now dynamically registered per classifier instance
+# No hardcoded enum - full flexibility for any document type
 
 @dataclass
 class LayoutFeatures:
@@ -114,12 +115,23 @@ class VisualFeatures:
 
 @dataclass
 class ClassificationResult:
-    """Document classification result."""
-    predicted_class: DocumentClass
+    """Result of document classification."""
+    document_type: str
     confidence: float
-    probabilities: Dict[DocumentClass, float]
-    features_used: Dict[str, Any]
+    probabilities: Dict[str, float]
+    features: Dict[str, Any]
     processing_time: float
+    model_used: str
+    azure_analysis: Optional[Dict[str, Any]] = None  # Azure prebuilt model results
+
+@dataclass
+class AzureClassificationResult:
+    """Result from Azure Document Intelligence prebuilt model classification."""
+    document_type: str
+    confidence: float
+    model_used: str
+    fields_detected: Dict[str, Any]
+    raw_result: AnalyzeResult
 
 class DocumentClassifier:
     """
@@ -135,7 +147,11 @@ class DocumentClassifier:
         transformer_model: str = "all-MiniLM-L6-v2",
         enable_ocr: bool = True,
         cache_features: bool = True,
-        debug_mode: bool = False
+        debug_mode: bool = False,
+        azure_endpoint: Optional[str] = None,
+        azure_api_key: Optional[str] = None,
+        use_azure_prebuilt: bool = True,
+        azure_confidence_threshold: float = 0.7
     ):
         """
         Initialize the document classifier.
@@ -147,14 +163,18 @@ class DocumentClassifier:
             enable_ocr: Whether to extract text using OCR
             cache_features: Whether to cache extracted features
             debug_mode: Enable detailed logging and feature saving
+            azure_endpoint: Azure Document Intelligence endpoint
+            azure_api_key: Azure Document Intelligence API key
+            use_azure_prebuilt: Whether to use Azure prebuilt models for classification
+            azure_confidence_threshold: Minimum confidence for Azure classification
         """
         self.model_type = model_type
-        # Check environment variable to disable transformers for faster startup
-        disable_transformers = os.getenv('DISABLE_TRANSFORMERS', '').lower() in ('1', 'true', 'yes')
-        self.use_transformers = use_transformers and TRANSFORMERS_AVAILABLE and not disable_transformers
+        self.use_transformers = use_transformers and TRANSFORMERS_AVAILABLE
         self.enable_ocr = enable_ocr and OCR_AVAILABLE
         self.cache_features = cache_features
         self.debug_mode = debug_mode
+        self.use_azure_prebuilt = use_azure_prebuilt and AZURE_DOC_INTEL_AVAILABLE
+        self.azure_confidence_threshold = azure_confidence_threshold
         
         # Initialize models
         self.classifier = self._create_classifier()
@@ -174,6 +194,49 @@ class DocumentClassifier:
             else:
                 logger.info(f"Transformer support enabled, will load {transformer_model} when needed")
         
+        # Specific Azure prebuilt models as requested
+        self.azure_prebuilt_models = [
+            ("prebuilt-invoice", "invoice"),
+            ("prebuilt-receipt", "receipt"),
+            ("prebuilt-contract", "contract"), 
+            ("prebuilt-idDocument", "id_document"),
+            ("prebuilt-document", "general_document")
+        ]
+        
+        # Document type registry with specific Azure types
+        self.document_types = set(["unknown", "invoice", "receipt", "contract", "id_document", "general_document"])
+        
+        # Field mappings loaded from schema files
+        self.azure_field_mappings = self._load_field_mappings_from_schemas()
+        self.schemas_dir = Path(__file__).parent.parent.parent / "config" / "schemas"
+        
+        # Initialize Azure Document Intelligence clients
+        self.azure_client = None
+        self.azure_admin_client = None
+        if self.use_azure_prebuilt and azure_endpoint and azure_api_key:
+            try:
+                credential = AzureKeyCredential(azure_api_key)
+                self.azure_client = DocumentIntelligenceClient(
+                    endpoint=azure_endpoint,
+                    credential=credential
+                )
+                self.azure_admin_client = DocumentIntelligenceAdministrationClient(
+                    endpoint=azure_endpoint,
+                    credential=credential
+                )
+                logger.info("Azure Document Intelligence clients initialized")
+                
+                # Validate and filter available models
+                self._validate_azure_models()
+                logger.info(f"Using available Azure models: {[model_id for model_id, _ in self.azure_prebuilt_models]}")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to initialize Azure clients: {e}")
+                self.use_azure_prebuilt = False
+        elif self.use_azure_prebuilt:
+            logger.warning("Azure endpoint or API key not provided, disabling Azure prebuilt models")
+            self.use_azure_prebuilt = False
+        
         # Feature cache
         self.feature_cache = {} if cache_features else None
         
@@ -182,6 +245,174 @@ class DocumentClassifier:
         self.feature_names = []
         
         logger.info(f"DocumentClassifier initialized: {model_type}, transformers={self.use_transformers}")
+    
+    def _load_field_mappings_from_schemas(self) -> Dict[str, List[str]]:
+        """
+        Load field mappings from schema JSON files.
+        
+        Returns:
+            Dictionary mapping document types to field lists
+        """
+        schemas_dir = Path(__file__).parent.parent.parent / "config" / "schemas"
+        field_mappings = {}
+        
+        # Expected schema files for our document types
+        document_types = ["invoice", "receipt", "contract", "id_document", "general_document"]
+        
+        for doc_type in document_types:
+            schema_file = schemas_dir / f"{doc_type}.json"
+            
+            if schema_file.exists():
+                try:
+                    with open(schema_file, 'r') as f:
+                        schema = json.load(f)
+                    
+                    # Extract field names from schema
+                    field_names = []
+                    if 'fields' in schema:
+                        for field_def in schema['fields']:
+                            if 'name' in field_def:
+                                field_names.append(field_def['name'])
+                    
+                    field_mappings[doc_type] = field_names
+                    logger.info(f"Loaded {len(field_names)} fields from {doc_type} schema")
+                    
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Failed to load schema for {doc_type}: {e}")
+                    # Fallback to basic field mapping
+                    field_mappings[doc_type] = self._get_fallback_fields(doc_type)
+            else:
+                logger.warning(f"Schema file not found: {schema_file}")
+                # Fallback to basic field mapping
+                field_mappings[doc_type] = self._get_fallback_fields(doc_type)
+        
+        return field_mappings
+    
+    def _get_fallback_fields(self, doc_type: str) -> List[str]:
+        """
+        Get fallback field mappings if schema files are not available.
+        
+        Args:
+            doc_type: Document type
+            
+        Returns:
+            List of basic field names for the document type
+        """
+        fallback_mappings = {
+            "invoice": ["VendorName", "InvoiceTotal", "InvoiceDate", "InvoiceId"],
+            "receipt": ["MerchantName", "Total", "TransactionDate"],
+            "contract": ["Parties", "ContractDate", "Terms"],
+            "id_document": ["FirstName", "LastName", "DocumentNumber", "DateOfBirth"],
+            "general_document": ["Content", "Pages"]
+        }
+        return fallback_mappings.get(doc_type, ["content"])
+    
+    def reload_schemas(self):
+        """
+        Reload field mappings from schema files.
+        Useful for updating schemas without restarting the application.
+        """
+        self.azure_field_mappings = self._load_field_mappings_from_schemas()
+        logger.info("Schema field mappings reloaded")
+    
+    def _validate_azure_models(self):
+        """
+        Validate which Azure prebuilt models are actually available and filter out unavailable ones.
+        """
+        if not self.azure_admin_client:
+            logger.warning("Cannot validate Azure models - admin client not available")
+            return
+        
+        try:
+            # Get list of available models
+            available_models = set()
+            for model in self.azure_admin_client.list_models():
+                available_models.add(model.model_id)
+            
+            # Filter out unavailable models
+            validated_models = []
+            for model_id, doc_type in self.azure_prebuilt_models:
+                if model_id in available_models:
+                    validated_models.append((model_id, doc_type))
+                    logger.debug(f"✅ Model available: {model_id}")
+                else:
+                    logger.warning(f"⚠️ Model not available in subscription: {model_id}")
+            
+            # Update the models list with only available models
+            self.azure_prebuilt_models = validated_models
+            
+            if not validated_models:
+                logger.error("❌ No Azure prebuilt models are available in this subscription")
+                self.use_azure_prebuilt = False
+            else:
+                logger.info(f"✅ Validated {len(validated_models)} available Azure models")
+                
+        except Exception as e:
+            logger.warning(f"Failed to validate Azure models: {e}")
+            logger.info("Will attempt to use models as configured (may fail if unavailable)")
+    
+    def get_schema_for_document_type(self, doc_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Load and return the complete schema for a document type.
+        
+        Args:
+            doc_type: Document type
+            
+        Returns:
+            Complete schema dictionary or None if not found
+        """
+        schema_file = self.schemas_dir / f"{doc_type}.json"
+        
+        if schema_file.exists():
+            try:
+                with open(schema_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Failed to load schema for {doc_type}: {e}")
+        
+        return None
+    
+    def get_field_synonyms(self, doc_type: str, field_name: str) -> List[str]:
+        """
+        Get synonyms for a field from the schema.
+        
+        Args:
+            doc_type: Document type
+            field_name: Field name
+            
+        Returns:
+            List of synonyms for the field
+        """
+        schema = self.get_schema_for_document_type(doc_type)
+        if not schema or 'fields' not in schema:
+            return []
+        
+        for field_def in schema['fields']:
+            if field_def.get('name') == field_name:
+                return field_def.get('synonyms', [])
+        
+        return []
+    
+    def get_field_validation_rules(self, doc_type: str, field_name: str) -> List[str]:
+        """
+        Get validation rules for a field from the schema.
+        
+        Args:
+            doc_type: Document type
+            field_name: Field name
+            
+        Returns:
+            List of validation rules for the field
+        """
+        schema = self.get_schema_for_document_type(doc_type)
+        if not schema or 'fields' not in schema:
+            return []
+        
+        for field_def in schema['fields']:
+            if field_def.get('name') == field_name:
+                return field_def.get('validation_rules', [])
+        
+        return []
     
     def _create_classifier(self):
         """Create the appropriate ML classifier."""
@@ -740,13 +971,13 @@ class DocumentClassifier:
         
         return np.array(features, dtype=np.float32)
     
-    def train(self, images: List[np.ndarray], labels: List[DocumentClass], texts: Optional[List[str]] = None):
+    def train(self, images: List[np.ndarray], labels: List[str], texts: Optional[List[str]] = None):
         """
         Train the document classifier.
         
         Args:
             images: List of document images
-            labels: List of corresponding document classes
+            labels: List of corresponding document type strings
             texts: Optional list of extracted texts
         """
         if len(images) != len(labels):
@@ -778,8 +1009,12 @@ class DocumentClassifier:
         X = np.array(X)
         y = np.array(y)
         
-        # Encode labels
-        y_encoded = self.label_encoder.fit_transform([cls.value for cls in y])
+        # Register all document types from training labels
+        for label in y:
+            self.document_types.add(label)
+        
+        # Encode labels (now they are already strings)
+        y_encoded = self.label_encoder.fit_transform(y)
         
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
@@ -820,24 +1055,25 @@ class DocumentClassifier:
         prediction = self.classifier.predict(features_scaled)[0]
         probabilities = self.classifier.predict_proba(features_scaled)[0]
         
-        # Convert back to DocumentClass
-        predicted_class = DocumentClass(self.label_encoder.inverse_transform([prediction])[0])
+        # Get predicted document type as string
+        predicted_type = self.label_encoder.inverse_transform([prediction])[0]
         confidence = np.max(probabilities)
         
         # Create probability dictionary
         class_probabilities = {}
         for i, prob in enumerate(probabilities):
             class_name = self.label_encoder.inverse_transform([i])[0]
-            class_probabilities[DocumentClass(class_name)] = float(prob)
+            class_probabilities[class_name] = float(prob)
         
         processing_time = time.time() - start_time
         
         return ClassificationResult(
-            predicted_class=predicted_class,
+            document_type=predicted_type,
             confidence=float(confidence),
             probabilities=class_probabilities,
-            features_used={"feature_count": len(features)},
-            processing_time=processing_time
+            features={"feature_count": len(features)},
+            processing_time=processing_time,
+            model_used="Traditional ML"
         )
     
     def save_model(self, filepath: str):
@@ -873,6 +1109,471 @@ class DocumentClassifier:
         
         self.is_trained = True
         logger.info(f"Model loaded from {filepath}")
+    
+    def register_document_type(self, doc_type: str, expected_fields: Optional[List[str]] = None):
+        """
+        Register a new document type that can be returned by Azure classification.
+        
+        Args:
+            doc_type: The document type name (e.g., "custom_contract")
+            expected_fields: List of field names expected for this document type
+        """
+        self.document_types.add(doc_type)
+        
+        if expected_fields:
+            self.azure_field_mappings[doc_type] = expected_fields
+        
+        logger.info(f"Registered document type: {doc_type}")
+    
+    def configure_document_fields(self, doc_type: str, expected_fields: List[str]):
+        """
+        Configure expected fields for a document type.
+        
+        Args:
+            doc_type: The document type name
+            expected_fields: List of field names expected for this document type
+        """
+        self.azure_field_mappings[doc_type] = expected_fields
+        self.document_types.add(doc_type)
+        logger.info(f"Configured fields for {doc_type}: {len(expected_fields)} fields")
+    
+    def get_registered_document_types(self) -> List[str]:
+        """
+        Get all registered document types.
+        
+        Returns:
+            List of registered document type names
+        """
+        return sorted(list(self.document_types))
+    
+    def configure_azure_models(self, models: List[Tuple[str, str]]):
+        """
+        Configure which Azure models to use for classification.
+        
+        Args:
+            models: List of (model_id, document_type) tuples
+                   e.g., [("prebuilt-invoice", "invoice"), ("my-custom-model", "custom_type")]
+        """
+        self.azure_prebuilt_models = models
+        
+        # Register all document types from the models
+        for model_id, doc_type in models:
+            self.document_types.add(doc_type)
+            
+            # Set up minimal field mappings for confidence calculation
+            if doc_type not in self.azure_field_mappings:
+                self._setup_dynamic_fields_for_model(model_id, doc_type)
+        
+        logger.info(f"Configured {len(models)} Azure models")
+    
+    def _setup_dynamic_fields_for_model(self, model_id: str, doc_type: str):
+        """
+        Set up dynamic field mappings for a model based on patterns and heuristics.
+        
+        Args:
+            model_id: Azure model ID
+            doc_type: Document type
+        """
+        # Try to infer reasonable field expectations based on document type patterns
+        inferred_fields = []
+        
+        # Use document type name to infer likely fields
+        doc_type_lower = doc_type.lower()
+        
+        if 'invoice' in doc_type_lower:
+            inferred_fields = ["vendor", "total", "date", "number", "items"]
+        elif 'receipt' in doc_type_lower:
+            inferred_fields = ["merchant", "total", "date", "items"]  
+        elif 'business' in doc_type_lower or 'card' in doc_type_lower:
+            inferred_fields = ["name", "company", "email", "phone"]
+        elif 'id' in doc_type_lower or 'identity' in doc_type_lower:
+            inferred_fields = ["name", "number", "date", "address"]
+        elif 'health' in doc_type_lower or 'insurance' in doc_type_lower:
+            inferred_fields = ["member", "insurer", "group", "policy"]
+        elif 'tax' in doc_type_lower:
+            inferred_fields = ["employee", "employer", "wages", "tax"]
+        elif 'layout' in doc_type_lower:
+            inferred_fields = ["pages", "tables", "paragraphs", "lines"]
+        elif 'read' in doc_type_lower or 'text' in doc_type_lower:
+            inferred_fields = ["content", "lines", "words"]
+        else:
+            # Generic fallback for unknown document types
+            inferred_fields = ["content", "text", "data"]
+        
+        self.azure_field_mappings[doc_type] = inferred_fields
+        logger.debug(f"Set up dynamic fields for {doc_type}: {inferred_fields}")
+    
+    def discover_azure_models(self) -> List[Dict[str, Any]]:
+        """
+        Discover all available Azure Document Intelligence models.
+        
+        Returns:
+            List of model information dictionaries
+        """
+        if not self.azure_admin_client:
+            logger.warning("Azure administration client not available")
+            return []
+        
+        try:
+            logger.info("🔍 Discovering available Azure Document Intelligence models...")
+            
+            # List all models
+            models = list(self.azure_admin_client.list_models())
+            
+            model_info = []
+            for model in models:
+                info = {
+                    'model_id': model.model_id,
+                    'description': getattr(model, 'description', ''),
+                    'created_date': getattr(model, 'created_date_time', None),
+                    'status': getattr(model, 'status', 'unknown'),
+                    'api_version': getattr(model, 'api_version', ''),
+                    'tags': getattr(model, 'tags', {})
+                }
+                model_info.append(info)
+            
+            logger.info(f"📋 Discovered {len(model_info)} Azure models")
+            return model_info
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to discover Azure models: {e}")
+            return []
+    
+    def get_prebuilt_models(self) -> List[Dict[str, Any]]:
+        """
+        Get only prebuilt models from Azure.
+        
+        Returns:
+            List of prebuilt model information
+        """
+        all_models = self.discover_azure_models()
+        
+        # Filter for prebuilt models (they typically start with 'prebuilt-')
+        prebuilt_models = [
+            model for model in all_models 
+            if model['model_id'].startswith('prebuilt-')
+        ]
+        
+        logger.info(f"📋 Found {len(prebuilt_models)} prebuilt models")
+        return prebuilt_models
+    
+    def get_custom_models(self) -> List[Dict[str, Any]]:
+        """
+        Get only custom models from Azure.
+        
+        Returns:
+            List of custom model information
+        """
+        all_models = self.discover_azure_models()
+        
+        # Filter for custom models (they typically don't start with 'prebuilt-')
+        custom_models = [
+            model for model in all_models 
+            if not model['model_id'].startswith('prebuilt-')
+        ]
+        
+        logger.info(f"📋 Found {len(custom_models)} custom models")
+        return custom_models
+    
+    def configure_models_from_discovery(self, 
+                                       include_prebuilt: bool = True, 
+                                       include_custom: bool = True,
+                                       model_filter: Optional[callable] = None) -> int:
+        """
+        Configure Azure models based on discovery results.
+        
+        Args:
+            include_prebuilt: Whether to include prebuilt models
+            include_custom: Whether to include custom models
+            model_filter: Optional function to filter models (model_info -> bool)
+            
+        Returns:
+            Number of models configured
+        """
+        logger.info("🔧 Configuring models from Azure discovery...")
+        
+        discovered_models = []
+        
+        if include_prebuilt:
+            prebuilt = self.get_prebuilt_models()
+            discovered_models.extend(prebuilt)
+        
+        if include_custom:
+            custom = self.get_custom_models()
+            discovered_models.extend(custom)
+        
+        # Apply filter if provided
+        if model_filter:
+            discovered_models = [m for m in discovered_models if model_filter(m)]
+        
+        # Convert to configuration format
+        model_configs = []
+        for model_info in discovered_models:
+            model_id = model_info['model_id']
+            
+            # Generate document type from model ID
+            if model_id.startswith('prebuilt-'):
+                # Convert prebuilt model names to document types
+                doc_type = self._prebuilt_model_to_doc_type(model_id)
+            else:
+                # Use custom model ID as document type (can be overridden)
+                doc_type = model_id.replace('-', '_').lower()
+            
+            model_configs.append((model_id, doc_type))
+        
+        # Configure the models
+        self.configure_azure_models(model_configs)
+        
+        logger.info(f"✅ Configured {len(model_configs)} models from discovery")
+        return len(model_configs)
+    
+    def _prebuilt_model_to_doc_type(self, model_id: str) -> str:
+        """
+        Convert prebuilt model ID to document type.
+        
+        Args:
+            model_id: Azure prebuilt model ID
+            
+        Returns:
+            Corresponding document type string
+        """
+        # Dynamically convert model ID to document type
+        # Remove 'prebuilt-' prefix and normalize the name
+        if model_id.startswith('prebuilt-'):
+            doc_type = model_id[9:]  # Remove 'prebuilt-' prefix
+        else:
+            doc_type = model_id
+        
+        # Normalize the document type name
+        doc_type = doc_type.replace('.', '_').replace('-', '_').lower()
+        
+        return doc_type
+    
+    def print_available_models(self):
+        """
+        Print information about all available Azure models.
+        """
+        logger.info("📋 Available Azure Document Intelligence Models:")
+        logger.info("=" * 60)
+        
+        prebuilt_models = self.get_prebuilt_models()
+        custom_models = self.get_custom_models()
+        
+        if prebuilt_models:
+            logger.info("\n🏭 PREBUILT MODELS:")
+            for model in prebuilt_models:
+                logger.info(f"  • {model['model_id']}")
+                if model['description']:
+                    logger.info(f"    Description: {model['description']}")
+                logger.info(f"    Status: {model['status']}")
+                if model['api_version']:
+                    logger.info(f"    API Version: {model['api_version']}")
+                logger.info()
+        
+        if custom_models:
+            logger.info("\n🔧 CUSTOM MODELS:")
+            for model in custom_models:
+                logger.info(f"  • {model['model_id']}")
+                if model['description']:
+                    logger.info(f"    Description: {model['description']}")
+                logger.info(f"    Status: {model['status']}")
+                if model['created_date']:
+                    logger.info(f"    Created: {model['created_date']}")
+                if model['tags']:
+                    logger.info(f"    Tags: {model['tags']}")
+                logger.info()
+        
+        total_models = len(prebuilt_models) + len(custom_models)
+        logger.info(f"\n📊 Total: {total_models} models ({len(prebuilt_models)} prebuilt, {len(custom_models)} custom)")
+        logger.info("=" * 60)
+    
+    async def classify_with_azure_prebuilt(self, document_bytes: bytes) -> Optional[AzureClassificationResult]:
+        """
+        Classify document using Azure Document Intelligence prebuilt models.
+        
+        Args:
+            document_bytes: Document as bytes
+            
+        Returns:
+            Azure classification result or None if not confident enough
+        """
+        if not self.azure_client:
+            return None
+        
+        # Use configured models (dynamically discovered or manually set)
+        prebuilt_models = self.azure_prebuilt_models
+        
+        if not prebuilt_models:
+            logger.warning("No Azure models configured. Use configure_models_from_discovery() or configure_azure_models()")
+            return None
+        
+        best_result = None
+        best_confidence = 0.0
+        
+        for model_id, doc_type in prebuilt_models:
+            try:
+                logger.debug(f"Testing Azure prebuilt model: {model_id}")
+                
+                # Analyze document with prebuilt model
+                analyze_request = AnalyzeDocumentRequest(bytes_source=document_bytes)
+                poller = self.azure_client.begin_analyze_document(
+                    model_id=model_id,
+                    body=analyze_request
+                )
+                result = poller.result()
+                
+                # Calculate confidence based on field detection and extraction quality
+                confidence = self._calculate_prebuilt_confidence(result, doc_type)
+                
+                if confidence > best_confidence and confidence >= self.azure_confidence_threshold:
+                    best_confidence = confidence
+                    best_result = AzureClassificationResult(
+                        document_type=doc_type,
+                        confidence=confidence,
+                        model_used=model_id,
+                        fields_detected=self._extract_detected_fields(result),
+                        raw_result=result
+                    )
+                
+                logger.debug(f"Model {model_id} confidence: {confidence:.3f}")
+                
+            except Exception as e:
+                if "ModelNotFound" in str(e) or "NotFound" in str(e):
+                    logger.warning(f"⚠️ Azure model not available: {model_id} - {e}")
+                    # Remove this model from future attempts
+                    self.azure_prebuilt_models = [(mid, dt) for mid, dt in self.azure_prebuilt_models if mid != model_id]
+                else:
+                    logger.debug(f"Failed to analyze with {model_id}: {e}")
+                continue
+        
+        return best_result
+    
+    def _calculate_prebuilt_confidence(self, result: AnalyzeResult, doc_type: str) -> float:
+        """
+        Calculate confidence score for prebuilt model result.
+        
+        Args:
+            result: Azure analysis result
+            doc_type: Document type being tested
+            
+        Returns:
+            Confidence score between 0 and 1
+        """
+        if not result.documents or len(result.documents) == 0:
+            return 0.0
+        
+        document = result.documents[0]
+        if not document.fields:
+            return 0.0
+        
+        # Calculate confidence based on number and quality of detected fields
+        field_confidences = []
+        expected_fields = self._get_expected_fields_for_doc_type(doc_type)
+        
+        detected_expected_fields = 0
+        for field_name, field_value in document.fields.items():
+            if field_name in expected_fields:
+                detected_expected_fields += 1
+                if hasattr(field_value, 'confidence') and field_value.confidence:
+                    field_confidences.append(field_value.confidence)
+        
+        if not field_confidences:
+            return 0.0
+        
+        # Combine field detection rate and average field confidence
+        detection_rate = detected_expected_fields / len(expected_fields) if expected_fields else 0
+        avg_field_confidence = sum(field_confidences) / len(field_confidences)
+        
+        # Weighted combination
+        overall_confidence = (detection_rate * 0.4) + (avg_field_confidence * 0.6)
+        
+        return min(overall_confidence, 1.0)
+    
+    def _get_expected_fields_for_doc_type(self, doc_type: str) -> List[str]:
+        """Get expected fields for each document type from dynamic mapping."""
+        return self.azure_field_mappings.get(doc_type, [])
+    
+    def _extract_detected_fields(self, result: AnalyzeResult) -> Dict[str, Any]:
+        """Extract and format detected fields from Azure result."""
+        detected_fields = {}
+        
+        if not result.documents or len(result.documents) == 0:
+            return detected_fields
+        
+        document = result.documents[0]
+        if not document.fields:
+            return detected_fields
+        
+        for field_name, field_value in document.fields.items():
+            field_info = {
+                "content": getattr(field_value, 'content', str(field_value)) if field_value else None,
+                "confidence": getattr(field_value, 'confidence', 0.0) if field_value else 0.0
+            }
+            detected_fields[field_name] = field_info
+        
+        return detected_fields
+    
+    async def classify_document(self, document_bytes: bytes, image: Optional[np.ndarray] = None, text: Optional[str] = None) -> ClassificationResult:
+        """
+        Classify document using Azure prebuilt models first, then fallback to traditional ML.
+        
+        Args:
+            document_bytes: Document as bytes for Azure analysis
+            image: Document image as numpy array for traditional ML
+            text: Optional pre-extracted text
+            
+        Returns:
+            Classification result
+        """
+        import time
+        start_time = time.time()
+        
+        azure_result = None
+        
+        # Try Azure prebuilt models first
+        if self.use_azure_prebuilt and self.azure_client:
+            try:
+                azure_result = await self.classify_with_azure_prebuilt(document_bytes)
+                if azure_result and azure_result.confidence >= self.azure_confidence_threshold:
+                    logger.info(f"Document classified by Azure as {azure_result.document_type} with confidence {azure_result.confidence:.3f}")
+                    
+                    processing_time = time.time() - start_time
+                    return ClassificationResult(
+                        document_type=azure_result.document_type,
+                        confidence=azure_result.confidence,
+                        probabilities={azure_result.document_type: azure_result.confidence},
+                        features={"azure_fields": azure_result.fields_detected},
+                        processing_time=processing_time,
+                        model_used=f"Azure {azure_result.model_used}",
+                        azure_analysis=azure_result.fields_detected
+                    )
+                else:
+                    logger.debug("Azure prebuilt models did not provide confident classification")
+            except Exception as e:
+                logger.warning(f"Azure prebuilt classification failed: {e}")
+        
+        # Fallback to traditional ML classification
+        if image is not None:
+            logger.info("Falling back to traditional ML classification")
+            traditional_result = self.classify(image, text)
+            
+            # Add Azure analysis to traditional result if available
+            if azure_result:
+                traditional_result.azure_analysis = azure_result.fields_detected
+            
+            return traditional_result
+        else:
+            # No image provided and Azure didn't work, return unknown
+            processing_time = time.time() - start_time
+            return ClassificationResult(
+                document_type="unknown",
+                confidence=0.0,
+                probabilities={"unknown": 1.0},
+                features={},
+                processing_time=processing_time,
+                model_used="none",
+                azure_analysis=azure_result.fields_detected if azure_result else None
+            )
 
 # Import regex for text analysis
 import re

@@ -1,782 +1,262 @@
 #!/usr/bin/env python3
 """
-Azure PDF Processing Pipeline
+Azure PDF Processing Pipeline - Main Entry Point (Safe Version)
 
-Complete end-to-end PDF processing system that:
-1. Monitors Azure Storage for new PDF files
-2. Downloads and preprocesses PDFs (deskew, denoise)
-3. Classifies document types
-4. Performs OCR and handwriting recognition
-5. Extracts fields and data
-6. Validates extracted data with business rules
-7. Summarizes and outputs results
+A streamlined main entry point with careful module loading to avoid
+import issues with heavy dependencies.
 
 Usage:
     python main.py monitor     # Continuous monitoring mode
-    python main.py process     # Process specific file
+    python main.py process     # Process specific file  
     python main.py batch       # Batch process all files
+    python main.py config      # Create sample config
+    python main.py info        # Show environment information
 """
 
 import argparse
 import asyncio
-import json
 import logging
-import os
 import sys
-import tempfile
-import time
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-
-# Additional imports for processing
-import numpy as np
-import cv2
 
 # Add the src directory to the Python path
 src_path = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_path))
 
-from dotenv import load_dotenv
+from src.core.config_manager import ConfigurationManager
 
-# Import core processing modules
-from core.azure_pdf_listener import AzurePDFListener
-from core.pdf_preprocessor import PDFPreprocessor
-from core.document_classifier import DocumentClassifier
-from core.azure_document_intelligence import AzureDocumentIntelligenceOCR
-from src.core.field_extraction import DocumentTemplate, FieldExtractor
-from core.validation_engine import ComprehensiveValidator
+# Load environment variables early
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("Warning: python-dotenv not installed, loading environment variables from system")
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
-class PDFProcessingPipeline:
-    """Complete PDF processing pipeline."""
-    
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize the processing pipeline with configuration."""
-        self.config = config
-        self.stats = {
-            'processed': 0,
-            'errors': 0,
-            'start_time': datetime.now()
-        }
-        
-        # Initialize components
-        self._initialize_components()
-    
-    def _initialize_components(self):
-        """Initialize all processing components."""
-        logger.info("Initializing PDF processing pipeline...")
-        
-        # Azure PDF Listener for file monitoring
-        self.pdf_listener = AzurePDFListener(
-            storage_account_name=self.config['storage_account'],
-            container_name=self.config['container_name'],
-            connection_string=self.config.get('connection_string'),
-            use_managed_identity=not bool(self.config.get('connection_string')),
-            polling_interval=self.config.get('polling_interval', 30),
-            log_level=self.config.get('log_level', 'INFO')
-        )
-        
-        # PDF Preprocessor for image enhancement
-        self.preprocessor = PDFPreprocessor()
-        
-        # Document Classifier for document type detection
-        self.classifier = DocumentClassifier()
-        
-        # OCR Engine for text extraction
-        if self.config.get('azure_doc_intelligence_endpoint') and self.config.get('azure_doc_intelligence_key'):
-            self.ocr_engine = AzureDocumentIntelligenceOCR(
-                endpoint=self.config['azure_doc_intelligence_endpoint'],
-                api_key=self.config['azure_doc_intelligence_key']
-            )
-        else:
-            logger.warning("Azure Document Intelligence not configured, using fallback OCR")
-            self.ocr_engine = None
-        
-        # Field Extractor for structured data extraction
-        self.field_extractor = FieldExtractor()
-        
-        # Validator for business rules and data validation
-        self.validator = ComprehensiveValidator()
-        
-        logger.info("✅ Pipeline components initialized successfully")
-    
-    async def process_pdf(self, blob_name: str, blob_client) -> Dict[str, Any]:
-        """Process a single PDF file through the complete pipeline."""
-        processing_start = time.time()
-        result = {
-            'blob_name': blob_name,
-            'processing_start': datetime.now().isoformat(),
-            'status': 'processing',
-            'stages': {},
-            'extracted_data': {},
-            'validation_results': [],
-            'summary': {}
-        }
-        
-        try:
-            logger.info(f"🔄 Processing PDF: {blob_name}")
-            
-            # Stage 1: Download PDF
-            logger.info(f"📥 Stage 1: Downloading {blob_name}")
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
-                pdf_path = temp_file.name
-                pdf_data = blob_client.download_blob().readall()
-                temp_file.write(pdf_data)
-            
-            result['stages']['download'] = {
-                'status': 'completed',
-                'file_size': len(pdf_data),
-                'local_path': pdf_path
-            }
-            
-            # Stage 2: Preprocess PDF
-            logger.info(f"🖼️  Stage 2: Preprocessing {blob_name}")
-            try:
-                preprocessed_path = await self._preprocess_pdf(pdf_path)
-                result['stages']['preprocessing'] = {
-                    'status': 'completed',
-                    'processed_path': preprocessed_path
-                }
-            except Exception as e:
-                logger.warning(f"Preprocessing failed: {e}, using original file")
-                preprocessed_path = pdf_path
-                result['stages']['preprocessing'] = {
-                    'status': 'skipped',
-                    'reason': str(e)
-                }
-            
-            # Stage 3: Document Classification
-            logger.info(f"🏷️  Stage 3: Classifying document type")
-            try:
-                doc_type, confidence = await self._classify_document(preprocessed_path)
-                result['stages']['classification'] = {
-                    'status': 'completed',
-                    'document_type': doc_type,
-                    'confidence': confidence
-                }
-            except Exception as e:
-                logger.warning(f"Classification failed: {e}")
-                doc_type, confidence = 'unknown', 0.5
-                result['stages']['classification'] = {
-                    'status': 'failed',
-                    'error': str(e),
-                    'fallback_type': doc_type
-                }
-            
-            # Stage 4: OCR and Text Extraction
-            logger.info(f"📄 Stage 4: Performing OCR and text extraction")
-            try:
-                ocr_results = await self._perform_ocr(preprocessed_path)
-                result['stages']['ocr'] = {
-                    'status': 'completed',
-                    'text_length': len(getattr(ocr_results, 'full_text', '')),
-                    'pages': getattr(ocr_results, 'pages', 1),
-                    'confidence': getattr(ocr_results, 'confidence_scores', {}).get('text', 0.0)
-                }
-            except Exception as e:
-                logger.error(f"OCR failed: {e}")
-                # Create mock object for fallback
-                class MockOCRResult:
-                    def __init__(self):
-                        self.full_text = ''
-                        self.fields = []
-                        self.text_blocks = []
-                        self.tables = []
-                        self.confidence_scores = {'text': 0.0}
-                ocr_results = MockOCRResult()
-                result['stages']['ocr'] = {
-                    'status': 'failed',
-                    'error': str(e)
-                }
-            
-            # Stage 5: Field Extraction
-            logger.info(f"🔍 Stage 5: Extracting structured fields")
-            try:
-                extracted_fields = await self._extract_fields(ocr_results, doc_type)
-                result['stages']['field_extraction'] = {
-                    'status': 'completed',
-                    'fields_count': len(extracted_fields),
-                    'fields': list(extracted_fields.keys())
-                }
-                result['extracted_data'] = extracted_fields
-            except Exception as e:
-                logger.error(f"Field extraction failed: {e}")
-                extracted_fields = {}
-                result['stages']['field_extraction'] = {
-                    'status': 'failed',
-                    'error': str(e)
-                }
-            
-            # Stage 6: Validation and Business Rules
-            logger.info(f"✓ Stage 6: Validating extracted data")
-            try:
-                validation_results = await self._validate_data(extracted_fields, doc_type)
-                result['validation_results'] = validation_results
-                result['stages']['validation'] = {
-                    'status': 'completed',
-                    'total_checks': len(validation_results),
-                    'passed': sum(1 for v in validation_results if v.is_valid),
-                    'failed': sum(1 for v in validation_results if not v.is_valid)
-                }
-            except Exception as e:
-                logger.error(f"Validation failed: {e}")
-                result['stages']['validation'] = {
-                    'status': 'failed',
-                    'error': str(e)
-                }
-            
-            # Stage 7: Generate Summary
-            logger.info(f"📊 Stage 7: Generating processing summary")
-            result['summary'] = self._generate_summary(result, processing_start)
-            result['status'] = 'completed'
-            
-            # Cleanup
-            try:
-                os.unlink(pdf_path)
-                if preprocessed_path != pdf_path:
-                    os.unlink(preprocessed_path)
-            except:
-                pass
-            
-            self.stats['processed'] += 1
-            logger.info(f"✅ Successfully processed {blob_name} in {time.time() - processing_start:.2f}s")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to process {blob_name}: {e}")
-            result['status'] = 'failed'
-            result['error'] = str(e)
-            self.stats['errors'] += 1
-        
-        return result
-    
-    async def _preprocess_pdf(self, pdf_path: str) -> str:
-        """Preprocess PDF for better OCR results."""
-        try:
-            # Use the PDFPreprocessor to deskew, denoise, etc.
-            loop = asyncio.get_event_loop()
-            preprocessed_path = await loop.run_in_executor(
-                None, self.preprocessor.process_pdf, pdf_path
-            )
-            return preprocessed_path
-        except Exception as e:
-            logger.warning(f"PDF preprocessing failed: {e}, using original file")
-            return pdf_path
-    
-    async def _classify_document(self, pdf_path: str) -> tuple:
-        """Classify document type."""
-        try:
-            # Convert PDF to image for classification
-            import cv2
-            from pdf2image import convert_from_path
-            
-            # Get first page as image
-            loop = asyncio.get_event_loop()
-            
-            # Create a wrapper function to handle keyword arguments
-            def convert_first_page():
-                return convert_from_path(pdf_path, first_page=1, last_page=1)
-            
-            pages = await loop.run_in_executor(None, convert_first_page)
-            
-            if pages:
-                # Convert PIL image to numpy array
-                import numpy as np
-                image = np.array(pages[0])
-                
-                # Use the DocumentClassifier
-                if hasattr(self.classifier, 'is_trained') and not self.classifier.is_trained:
-                    logger.warning("DocumentClassifier not trained, using basic classification")
-                    return "unknown", 0.5
-                
-                classification_result = await loop.run_in_executor(
-                    None, self.classifier.classify, image
-                )
-                return classification_result.predicted_class.value, classification_result.confidence
-            else:
-                logger.warning("Could not extract image from PDF for classification")
-                return "unknown", 0.5
-                
-        except Exception as e:
-            logger.warning(f"Document classification failed: {e}")
-            return "unknown", 0.5
-    
-    async def _perform_ocr(self, pdf_path: str) -> Any:
-        """Perform OCR and handwriting recognition."""
-        if self.ocr_engine:
-            # Use Azure Document Intelligence - return DocumentAnalysisResult object
-            try:
-                # Use analyze_document directly instead of extract_text_async to get full object
-                loop = asyncio.get_event_loop()
-                with open(pdf_path, 'rb') as f:
-                    pdf_bytes = f.read()
-                results = await loop.run_in_executor(
-                    None, self.ocr_engine.analyze_document, pdf_bytes
-                )
-                return results
-            except Exception as e:
-                logger.warning(f"Azure OCR failed: {e}, using fallback")
-                # Create a mock DocumentAnalysisResult-like object for fallback
-                class MockOCRResult:
-                    def __init__(self, error_msg):
-                        self.full_text = f'OCR failed: {error_msg}'
-                        self.fields = []
-                        self.text_blocks = []
-                        self.tables = []
-                        self.confidence_scores = {'text': 0.0}
-                return MockOCRResult(str(e))
-        else:
-            # Fallback OCR implementation - create mock object
-            class MockOCRResult:
-                def __init__(self):
-                    self.full_text = 'OCR not configured'
-                    self.fields = []
-                    self.text_blocks = []
-                    self.tables = []
-                    self.confidence_scores = {'text': 0.0}
-            return MockOCRResult()
-    
-    async def _extract_fields(self, ocr_results: Any, doc_type: str) -> Dict[str, Any]:
-        """Extract structured fields from OCR results."""
-        try:
-            # Convert string doc_type to DocumentTemplate enum
-            template_mapping = {
-                'invoice': DocumentTemplate.INVOICE,
-                'receipt': DocumentTemplate.RECEIPT,
-                'purchase_order': DocumentTemplate.PURCHASE_ORDER,
-                'tax_form': DocumentTemplate.TAX_FORM,
-                'contract': DocumentTemplate.CONTRACT,
-                'form_application': DocumentTemplate.FORM_APPLICATION,
-                'bank_statement': DocumentTemplate.BANK_STATEMENT,
-                'insurance_claim': DocumentTemplate.INSURANCE_CLAIM,
-            }
-            
-            doc_template = template_mapping.get(doc_type.lower(), DocumentTemplate.CUSTOM)
-            
-            # Use the FieldExtractor to extract structured data
-            loop = asyncio.get_event_loop()
-            extraction_result = await loop.run_in_executor(
-                None, self.field_extractor.extract_fields, ocr_results, doc_template
-            )
-            
-            # Convert ExtractionResult to dictionary format
-            if hasattr(extraction_result, 'extracted_fields'):
-                # Convert field objects to dictionary format
-                fields_dict = {}
-                for field in extraction_result.extracted_fields:
-                    fields_dict[field.field_name] = {
-                        'value': field.normalized_value or field.value,
-                        'confidence': field.confidence,
-                        'source': getattr(field, 'source', 'extracted')
-                    }
-                
-                fields_dict['document_type'] = doc_type
-                fields_dict['template_type'] = extraction_result.template_type.value
-                fields_dict['overall_confidence'] = extraction_result.overall_confidence
-                return fields_dict
-            else:
-                # Fallback if result format is unexpected
-                return {
-                    'document_type': doc_type,
-                    'extraction_result': str(extraction_result),
-                    'confidence_scores': {}
-                }
-            
-        except Exception as e:
-            logger.warning(f"Field extraction failed: {e}")
-            # Return minimal fallback data
-            return {
-                'document_type': doc_type,
-                'extraction_error': str(e),
-                'confidence_scores': {}
-            }
-    
-    async def _validate_data(self, extracted_fields: Dict, doc_type: str) -> List[Any]:
-        """Validate extracted data against business rules."""
-        try:
-            # Use the ComprehensiveValidator
-            loop = asyncio.get_event_loop()
-            validation_results = await loop.run_in_executor(
-                None, self.validator.validate_document, extracted_fields, doc_type
-            )
-            
-            return validation_results
-            
-        except Exception as e:
-            logger.warning(f"Data validation failed: {e}")
-            # Return empty validation results on error
-            return []
-    
-    def _generate_summary(self, result: Dict, processing_start: float) -> Dict[str, Any]:
-        """Generate processing summary."""
-        processing_time = time.time() - processing_start
-        
-        # Calculate quality score first
-        data_quality_score = self._calculate_quality_score(result)
-        
-        return {
-            'processing_time_seconds': round(processing_time, 2),
-            'total_stages': len(result['stages']),
-            'successful_stages': sum(1 for stage in result['stages'].values() if stage['status'] == 'completed'),
-            'failed_stages': sum(1 for stage in result['stages'].values() if stage['status'] == 'failed'),
-            'data_quality_score': data_quality_score,
-            'requires_human_review': self._needs_human_review(result, data_quality_score)
-        }
-    
-    def _calculate_quality_score(self, result: Dict) -> float:
-        """Calculate overall data quality score."""
-        # Simple scoring based on stage completion and validation results
-        stage_score = len([s for s in result['stages'].values() if s['status'] == 'completed']) / len(result['stages'])
-        return round(stage_score * 100, 1)
-    
-    def _needs_human_review(self, result: Dict, data_quality_score: float = None) -> bool:
-        """Determine if document needs human review."""
-        # Check if any critical stages failed or validation issues
-        critical_failures = sum(1 for stage in ['ocr', 'field_extraction'] 
-                              if result['stages'].get(stage, {}).get('status') == 'failed')
-        
-        # Use provided quality score or try to get it from result
-        quality_score = data_quality_score
-        if quality_score is None:
-            quality_score = result.get('summary', {}).get('data_quality_score', 0.0)
-        
-        return critical_failures > 0 or quality_score < 80
+def setup_basic_logging():
+    """Setup basic logging before configuration is loaded."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
 
 
-def load_configuration() -> Dict[str, Any]:
-    """Load configuration from environment variables."""
-    config = {
-        'storage_account': os.getenv('AZURE_STORAGE_ACCOUNT_NAME'),
-        'container_name': os.getenv('AZURE_STORAGE_CONTAINER_NAME', 'pdfs'),
-        'connection_string': os.getenv('AZURE_STORAGE_CONNECTION_STRING'),
-        'azure_doc_intelligence_endpoint': os.getenv('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'),
-        'azure_doc_intelligence_key': os.getenv('AZURE_DOCUMENT_INTELLIGENCE_KEY'),
-        'polling_interval': int(os.getenv('POLLING_INTERVAL', '30')),
-        'log_level': os.getenv('LOG_LEVEL', 'INFO')
-    }
+def show_environment_info(config):
+    """Show environment information for debugging."""
+    env_info = ConfigurationManager.get_environment_info()
     
-    # Validate required configuration
-    if not config['storage_account']:
-        raise ValueError("AZURE_STORAGE_ACCOUNT_NAME is required")
+    print("🔧 Environment Information:")
+    print(f"   Python: {env_info['python_version']}")
+    print(f"   Platform: {env_info['platform']}")
+    print(f"   Working Directory: {env_info['working_directory']}")
     
-    return config
+    print("\n⚙️  Configuration:")
+    print(f"   Azure Container: {config['azure']['container_name']}")
+    print(f"   Azure Doc Intel: {'Enabled' if config['azure_document_intelligence']['enabled'] else 'Disabled'}")
+    print(f"   Polling Interval: {config['monitoring']['polling_interval']}s")
+    print(f"   Max Concurrent: {config['processing']['max_concurrent_processing']}")
+    print(f"   Save Results: {'Yes' if config['output']['save_results'] else 'No'}")
+    print(f"   Export Format: {config['output']['export_format']}")
 
 
-async def run_monitor_mode(config: Dict[str, Any]):
-    """Run in continuous monitoring mode."""
-    logger.info("🚀 Starting PDF Processing Pipeline in Monitor Mode")
-    pipeline = PDFProcessingPipeline(config)
-    
-    # Store pending tasks to keep track of processing
-    pending_tasks = set()
-    
-    async def process_and_display_pdf(blob_name: str, blob_client, pipeline):
-        """Process PDF and display results."""
-        try:
-            result = await pipeline.process_pdf(blob_name, blob_client)
-            
-            # Output results
-            print("\n" + "="*60)
-            print(f"📊 PROCESSING COMPLETE: {blob_name}")
-            print("="*60)
-            print(json.dumps(result, indent=2, default=str))
-            print("="*60 + "\n")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to process {blob_name}: {e}")
-            print(f"\n❌ PROCESSING FAILED: {blob_name}")
-            print(f"Error: {e}\n")
-    
-    # Show current status
-    print(f"📁 Monitoring container: {config['container_name']}")
-    print(f"🏢 Storage account: {config['storage_account']}")
-    print(f"⏱️  Polling interval: {config['polling_interval']} seconds")
-    print()
+async def run_monitor_mode(config):
+    """Run continuous monitoring mode."""
+    logger.info("🚀 Starting PDF Processing Pipeline - Monitor Mode")
     
     try:
-        print("🎯 Starting continuous monitoring...")
-        print("   Upload PDF files to your Azure container to see them processed")
-        print("   Press Ctrl+C to stop")
-        print()
+        # Import our modular components
+        logger.info("Loading processing components...")
         
-        # Run our own async polling loop instead of using the synchronous one
-        await run_async_polling_loop(pipeline, pending_tasks, process_and_display_pdf)
+        from src.core.monitor_service import PDFMonitorService
+        from src.core.result_handler import ResultHandler
         
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.info("🛑 Monitoring stopped by user")
+        # Initialize services
+        monitor_service = PDFMonitorService(config)
+        result_handler = ResultHandler(config)
         
-        # Cancel any pending tasks gracefully
-        if pending_tasks:
-            logger.info(f"Cancelling {len(pending_tasks)} pending tasks...")
-            for task in pending_tasks:
-                if not task.done():
-                    task.cancel()
-            # Wait for cancellation to complete
-            await asyncio.gather(*pending_tasks, return_exceptions=True)
-        
-        # Show final statistics
-        runtime = datetime.now() - pipeline.stats['start_time']
-        print(f"\n📈 Session Statistics:")
-        print(f"   Runtime: {runtime}")
-        print(f"   Files processed: {pipeline.stats['processed']}")
-        print(f"   Errors: {pipeline.stats['errors']}")
-
-
-async def run_async_polling_loop(pipeline, pending_tasks, process_and_display_pdf):
-    """Run an async polling loop that properly handles PDF detection and processing."""
-    processed_files = set()
-    polling_interval = pipeline.config.get('polling_interval', 30)
-    
-    while True:
-        try:
-            # Get current PDF files from the container
-            current_files = pipeline.pdf_listener.get_pdf_files()
-            
-            # Check for new files
-            for file_info in current_files:
-                blob_name = file_info['name']
-                
-                # Check if this is a new file we haven't processed
-                if blob_name not in processed_files:
-                    logger.info(f"📄 New PDF detected: {blob_name}")
-                    print(f"\n📄 DETECTED: {blob_name}")
-                    print(f"   Size: {file_info['size']} bytes")
-                    print(f"   Last modified: {file_info['last_modified']}")
-                    print("   Starting processing...")
-                    
-                    # Get blob client for this file
-                    blob_client = pipeline.pdf_listener.get_blob_client(blob_name)
-                    
-                    # Create async task for processing
-                    task = asyncio.create_task(
-                        process_and_display_pdf(blob_name, blob_client, pipeline)
-                    )
-                    pending_tasks.add(task)
-                    task.add_done_callback(lambda t: pending_tasks.discard(t))
-                    
-                    # Mark as processed
-                    processed_files.add(blob_name)
-            
-            # Sleep for the polling interval
-            await asyncio.sleep(polling_interval)
-            
-        except asyncio.CancelledError:
-            logger.info("Polling task cancelled")
-            break
-        except KeyboardInterrupt:
-            logger.info("Polling stopped by user")
-            break
-        except Exception as e:
-            logger.error(f"Error during polling: {e}")
-            await asyncio.sleep(polling_interval)
-
-
-async def run_process_mode(config: Dict[str, Any], filename: str):
-    """Process a specific file."""
-    logger.info(f"🔄 Processing specific file: {filename}")
-    pipeline = PDFProcessingPipeline(config)
-    
-    # Get the specific blob
-    blob_client = pipeline.pdf_listener.get_blob_client(filename)
-    
-    try:
-        result = await pipeline.process_pdf(filename, blob_client)
-        
-        print("\n" + "="*60)
-        print(f"📊 PROCESSING RESULT: {filename}")
-        print("="*60)
-        print(json.dumps(result, indent=2, default=str))
-        print("="*60)
+        # Run monitoring
+        await monitor_service.run_monitor_mode()
         
     except Exception as e:
-        logger.error(f"Failed to process {filename}: {e}")
+        logger.error(f"❌ Monitor mode failed: {e}")
+        logger.info("💡 Make sure all required packages are installed and environment variables are set")
+        raise
 
 
-async def run_batch_mode(config: Dict[str, Any]):
-    """Process all PDF files in the container."""
-    logger.info("📦 Starting batch processing mode")
-    pipeline = PDFProcessingPipeline(config)
+async def run_process_mode(config, filename):
+    """Process a specific file."""
+    logger.info(f"🚀 Starting PDF Processing Pipeline - Process Mode: {filename}")
     
-    # Get all PDF files
-    pdf_files = pipeline.pdf_listener.get_pdf_files()
-    
-    if not pdf_files:
-        print("📭 No PDF files found in container")
-        return
-    
-    print(f"📄 Found {len(pdf_files)} PDF files to process")
-    results = []
-    
-    for i, file_info in enumerate(pdf_files, 1):
-        filename = file_info['name']
-        print(f"\n[{i}/{len(pdf_files)}] Processing: {filename}")
+    try:
+        from src.core.monitor_service import PDFMonitorService
+        from src.core.result_handler import ResultHandler
         
-        blob_client = pipeline.pdf_listener.get_blob_client(filename)
-        result = await pipeline.process_pdf(filename, blob_client)
-        results.append(result)
+        # Initialize services
+        monitor_service = PDFMonitorService(config)
+        result_handler = ResultHandler(config)
+        
+        # Process the specific file
+        result = await monitor_service.process_single_file(filename)
+        
+        # Save result
+        if result:
+            saved_path = await result_handler.save_result(result)
+            if saved_path:
+                logger.info(f"💾 Result saved to: {saved_path}")
+            
+            # Display summary
+            logger.info("📋 Processing Summary:")
+            summary = result.get('summary', {})
+            logger.info(f"   ⏱️  Processing Time: {summary.get('processing_time', 0):.2f}s")
+            logger.info(f"   ✅ Success Rate: {summary.get('success_rate', 0):.1%}")
+            logger.info(f"   📊 Quality Score: {summary.get('data_quality_score', 0):.2f}")
+            logger.info(f"   👤 Needs Review: {'Yes' if result.get('needs_human_review') else 'No'}")
+        
+    except Exception as e:
+        logger.error(f"❌ Process mode failed: {e}")
+        raise
+
+
+async def run_batch_mode(config):
+    """Process all files in batch mode."""
+    logger.info("🚀 Starting PDF Processing Pipeline - Batch Mode")
     
-    # Show batch summary
-    successful = sum(1 for r in results if r['status'] == 'completed')
-    failed = len(results) - successful
-    
-    print(f"\n📊 BATCH PROCESSING COMPLETE")
-    print(f"   Total files: {len(results)}")
-    print(f"   Successful: {successful}")
-    print(f"   Failed: {failed}")
-    
-    # Optionally save results to file
-    results_file = f"batch_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2, default=str)
-    print(f"   Results saved to: {results_file}")
-
-
-def run_tests():
-    """Run the test suite."""
-    import subprocess
-    test_dir = Path(__file__).parent / "tests"
-    subprocess.run([sys.executable, "-m", "unittest", "discover", str(test_dir)])
-
-
-def setup_project():
-    """Run the project setup."""
     try:
-        from scripts.setup import main
-        main()
-    except ImportError:
-        print("❌ Setup script not found. Please create .env file manually.")
-
-
-def validate_setup():
-    """Validate the project setup."""
-    try:
-        from tests.test_setup import main
-        main()
-    except ImportError:
-        print("❌ Validation script not found. Testing basic configuration...")
-        config = load_configuration()
-        print("✅ Configuration loaded successfully")
+        from src.core.monitor_service import PDFMonitorService
+        from src.core.result_handler import ResultHandler
+        
+        # Initialize services
+        monitor_service = PDFMonitorService(config)
+        result_handler = ResultHandler(config)
+        
+        # Process all files
+        results = await monitor_service.process_batch()
+        
+        if results:
+            # Save batch results
+            saved_path = await result_handler.save_batch_results(results)
+            if saved_path:
+                logger.info(f"💾 Batch results saved to: {saved_path}")
+            
+            # Display batch summary
+            successful = len([r for r in results if not r.get('error')])
+            failed = len(results) - successful
+            
+            logger.info("📋 Batch Processing Summary:")
+            logger.info(f"   📄 Total Files: {len(results)}")
+            logger.info(f"   ✅ Successful: {successful}")
+            logger.info(f"   ❌ Failed: {failed}")
+            logger.info(f"   📊 Success Rate: {successful/len(results):.1%}")
+            
+            if failed > 0:
+                logger.info("❌ Failed files:")
+                for result in results:
+                    if result.get('error'):
+                        logger.info(f"   - {result.get('blob_name', 'unknown')}: {result.get('error')}")
+        else:
+            logger.info("📂 No files found to process")
+        
+    except Exception as e:
+        logger.error(f"❌ Batch mode failed: {e}")
+        raise
 
 
 def main():
-    """Main entry point with command-line argument parsing."""
+    """Main entry point."""
+    setup_basic_logging()
     
     parser = argparse.ArgumentParser(
-        description="Azure PDF Processing Pipeline - Complete end-to-end PDF processing",
+        description="Azure PDF Processing Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py monitor                # Continuous monitoring mode
-  python main.py process file.pdf      # Process specific PDF file
-  python main.py batch                 # Batch process all PDFs
-  python main.py setup                 # Set up the project
-  python main.py test                  # Run tests
-  python main.py validate              # Validate configuration
-
-Processing Pipeline:
-  1. Downloads PDF from Azure Storage
-  2. Preprocesses (deskew, denoise)
-  3. Classifies document type
-  4. Performs OCR and handwriting recognition
-  5. Extracts structured fields
-  6. Validates data with business rules
-  7. Summarizes results and outputs JSON
+  python main.py monitor                    # Start monitoring mode
+  python main.py monitor --watch-interval 5 # Monitor with 5s interval
+  python main.py process invoice.pdf        # Process specific file
+  python main.py batch                      # Process all files
+  python main.py config                     # Create sample config
+  python main.py info                       # Show environment info
         """
     )
     
     parser.add_argument(
-        "mode",
-        choices=["monitor", "process", "batch", "setup", "test", "validate"],
-        help="Operation mode to run"
+        'mode',
+        choices=['monitor', 'process', 'batch', 'config', 'info'],
+        help='Processing mode'
     )
     
     parser.add_argument(
-        "filename",
-        nargs="?",
-        help="PDF filename to process (required for 'process' mode)"
+        'filename',
+        nargs='?',
+        help='PDF filename to process (required for process mode)'
     )
     
     parser.add_argument(
-        "--config",
-        default=".env",
-        help="Path to configuration file (default: .env)"
+        '--watch-interval',
+        type=int,
+        help='Polling interval in seconds for monitor mode'
     )
     
     parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose output"
+        '--log-level',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        help='Override log level'
     )
     
     args = parser.parse_args()
     
-    # Load environment variables from specified config file
-    if os.path.exists(args.config):
-        load_dotenv(args.config)
-    elif args.mode not in ["setup"]:
-        print(f"⚠️  Configuration file '{args.config}' not found")
-        print("   Run 'python main.py setup' to create it")
+    # Handle special modes first
+    if args.mode == 'config':
+        ConfigurationManager.create_sample_env_file()
         return
     
-    # Set verbose logging if requested
-    if args.verbose:
-        os.environ["LOG_LEVEL"] = "DEBUG"
-        logger.setLevel(logging.DEBUG)
-    
-    # Route to appropriate function
     try:
-        if args.mode == "monitor":
-            print("🚀 Starting PDF Processing Pipeline - Monitor Mode")
-            config = load_configuration()
+        # Load configuration
+        config = ConfigurationManager.load_configuration()
+        
+        # Override config with command line arguments
+        if args.watch_interval:
+            config['monitoring']['polling_interval'] = args.watch_interval
+        
+        if args.log_level:
+            config['logging']['level'] = args.log_level
+        
+        # Setup logging with ConfigurationManager
+        ConfigurationManager.setup_logging(config)
+        
+        # Handle info mode
+        if args.mode == 'info':
+            show_environment_info(config)
+            return
+        
+        # Validate arguments
+        if args.mode == 'process' and not args.filename:
+            logger.error("❌ Filename is required for process mode")
+            parser.print_help()
+            sys.exit(1)
+        
+        # Validate required configuration
+        if not config['azure']['connection_string'] and not config['azure']['enable_managed_identity']:
+            logger.error("❌ AZURE_STORAGE_CONNECTION_STRING or USE_MANAGED_IDENTITY is required")
+            logger.info("💡 Run 'python main.py config' to create a sample configuration file")
+            sys.exit(1)
+        
+        # Run the appropriate mode
+        if args.mode == 'monitor':
             asyncio.run(run_monitor_mode(config))
-            
-        elif args.mode == "process":
-            if not args.filename:
-                print("❌ Filename required for process mode")
-                print("   Usage: python main.py process filename.pdf")
-                return
-            print(f"🔄 Processing specific file: {args.filename}")
-            config = load_configuration()
+        elif args.mode == 'process':
             asyncio.run(run_process_mode(config, args.filename))
-            
-        elif args.mode == "batch":
-            print("� Starting batch processing mode")
-            config = load_configuration()
+        elif args.mode == 'batch':
             asyncio.run(run_batch_mode(config))
             
-        elif args.mode == "setup":
-            print("🔧 Setting up Azure PDF Processing Pipeline...")
-            setup_project()
-            
-        elif args.mode == "test":
-            print("🧪 Running test suite...")
-            run_tests()
-            
-        elif args.mode == "validate":
-            print("✅ Validating setup...")
-            validate_setup()
-            
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        print(f"❌ Configuration error: {e}")
-        print("   Please check your .env file and Azure configuration")
-        
     except KeyboardInterrupt:
-        logger.info("Operation cancelled by user")
-        
+        logger.info("🛑 Application stopped by user")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        print(f"💥 Unexpected error: {e}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
+        logger.error(f"❌ Application failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

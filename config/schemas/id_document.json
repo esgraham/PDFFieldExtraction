@@ -1,0 +1,205 @@
+{
+  "template_type": "id_document",
+  "version": "1.0",
+  "required_confidence": 0.9,
+  "fields": [
+    {
+      "name": "document_type",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "type",
+        "document",
+        "id type"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ],
+      "confidence_threshold": 0.8,
+      "description": "Type of identification document"
+    },
+    {
+      "name": "first_name",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "given name",
+        "first",
+        "name"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "alphabetic"
+      ],
+      "confidence_threshold": 0.9
+    },
+    {
+      "name": "last_name",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "surname",
+        "family name",
+        "last"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "alphabetic"
+      ],
+      "confidence_threshold": 0.9
+    },
+    {
+      "name": "middle_name",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "middle",
+        "middle initial"
+      ],
+      "validation_rules": [
+        "alphabetic"
+      ]
+    },
+    {
+      "name": "document_number",
+      "field_type": "text",
+      "required": true,
+      "synonyms": [
+        "id number",
+        "license number",
+        "passport number",
+        "number"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "alphanumeric"
+      ],
+      "confidence_threshold": 0.9
+    },
+    {
+      "name": "date_of_birth",
+      "field_type": "date",
+      "required": true,
+      "synonyms": [
+        "dob",
+        "birth date",
+        "born"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "past_date",
+        "reasonable_age"
+      ],
+      "confidence_threshold": 0.9
+    },
+    {
+      "name": "issue_date",
+      "field_type": "date",
+      "required": false,
+      "synonyms": [
+        "issued",
+        "date issued",
+        "issued on"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "past_date"
+      ]
+    },
+    {
+      "name": "expiration_date",
+      "field_type": "date",
+      "required": false,
+      "synonyms": [
+        "expires",
+        "exp",
+        "expiry",
+        "valid until"
+      ],
+      "validation_rules": [
+        "valid_date",
+        "future_date"
+      ]
+    },
+    {
+      "name": "address",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "addr",
+        "residence",
+        "home address"
+      ],
+      "validation_rules": [
+        "not_empty",
+        "min_length:10"
+      ],
+      "confidence_threshold": 0.7
+    },
+    {
+      "name": "gender",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "sex",
+        "m/f"
+      ],
+      "validation_rules": [
+        "valid_gender"
+      ]
+    },
+    {
+      "name": "height",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "ht",
+        "hgt"
+      ],
+      "validation_rules": [
+        "valid_height"
+      ]
+    },
+    {
+      "name": "weight",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "wt",
+        "wgt"
+      ],
+      "validation_rules": [
+        "valid_weight"
+      ]
+    },
+    {
+      "name": "eye_color",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "eyes",
+        "eye"
+      ],
+      "validation_rules": [
+        "valid_eye_color"
+      ]
+    },
+    {
+      "name": "nationality",
+      "field_type": "text",
+      "required": false,
+      "synonyms": [
+        "country of origin",
+        "citizenship"
+      ],
+      "validation_rules": [
+        "not_empty"
+      ]
+    }
+  ],
+  "business_rules": [
+    "expiration_after_issue_date",
+    "reasonable_age_range",
+    "required_fields_present"
+  ]
+}

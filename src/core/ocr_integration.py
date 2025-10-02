@@ -173,13 +173,24 @@ class EnhancedPDFListener(ClassificationIntegratedListener):
         
         if self.enable_classification and self.classifier:
             try:
-                # Use preprocessed images if available, otherwise original file
-                source_data = preprocessed_images[0] if preprocessed_images else local_file_path
-                class_result = self.classifier.classify_document(source_data)
-                
-                document_class = class_result["predicted_class"]
-                classification_confidence = class_result["confidence"]
-                classification_features = class_result.get("features", {})
+                # Use preprocessed images for classification
+                if preprocessed_images:
+                    import asyncio
+                    # Read PDF bytes for Azure analysis
+                    with open(local_file_path, 'rb') as f:
+                        pdf_bytes = f.read()
+                    
+                    # Use Azure-enabled classification
+                    class_result = asyncio.run(self.classifier.classify_document(pdf_bytes, preprocessed_images[0]))
+                    document_class = class_result.document_type
+                    classification_confidence = class_result.confidence
+                    classification_features = class_result.features
+                else:
+                    # Fallback to basic classification without image
+                    logger.warning("No preprocessed images available for classification")
+                    document_class = "unknown"
+                    classification_confidence = 0.0
+                    classification_features = {}
                 processing_pipeline.append("classification")
                 
                 logger.info(f"Classification: {document_class} (confidence: {classification_confidence:.2f})")
@@ -425,7 +436,8 @@ class EnhancedPDFListener(ClassificationIntegratedListener):
             },
             
             "classification_results": {
-                "predicted_class": document_class,
+                "predicted_class": document_class,  # Legacy format
+                "document_type": document_class,     # New format
                 "confidence": classification_confidence,
                 "features": classification_features
             },

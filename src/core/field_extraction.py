@@ -558,6 +558,8 @@ class DocumentTemplate(Enum):
     FORM_APPLICATION = "form_application"
     BANK_STATEMENT = "bank_statement"
     INSURANCE_CLAIM = "insurance_claim"
+    ID_DOCUMENT = "id_document"
+    GENERAL_DOCUMENT = "general_document"
     CUSTOM = "custom"
 
 @dataclass

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from azure_pdf_listener import AzurePDFListener
 from pdf_preprocessor import PDFPreprocessor
-from document_classifier import DocumentClassifier, DocumentClass, ClassificationResult
+from document_classifier import DocumentClassifier, ClassificationResult
 from pdf_integration import PreprocessingPDFListener
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         # Statistics
         self.classification_stats = {
             "total_classified": 0,
-            "class_counts": {cls.value: 0 for cls in DocumentClass},
+            "class_counts": {},  # Will be populated dynamically
             "avg_confidence": 0.0,
             "processing_times": []
         }
@@ -101,7 +101,7 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         self, 
         blob_name: str, 
         blob_data: bytes,
-        expected_class: Optional[DocumentClass] = None
+        expected_class: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Process PDF with preprocessing and classification.
@@ -143,7 +143,15 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
             for i, (image, text) in enumerate(zip(processed_images, extracted_texts)):
                 try:
                     if self.classifier.is_trained:
-                        result = self.classifier.classify(image, text)
+                        # Use Azure-enabled classification for first page, fallback for others
+                        if i == 0 and hasattr(self.classifier, 'classify_document'):
+                            # First page: try Azure prebuilt models with full document
+                            import asyncio
+                            result = asyncio.run(self.classifier.classify_document(blob_data, image, text))
+                        else:
+                            # Other pages: use traditional classification
+                            result = self.classifier.classify(image, text)
+                        
                         classification_results.append({
                             "page": i + 1,
                             "result": result
@@ -152,7 +160,7 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
                         # Update statistics
                         self._update_classification_stats(result)
                         
-                        logger.info(f"Page {i+1} classified as {result.predicted_class.value} "
+                        logger.info(f"Page {i+1} classified as {result.document_type} "
                                   f"with confidence {result.confidence:.2f}")
                     
                     # Store data for auto-training if enabled
@@ -214,7 +222,15 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
     def _update_classification_stats(self, result: ClassificationResult):
         """Update classification statistics."""
         self.classification_stats["total_classified"] += 1
-        self.classification_stats["class_counts"][result.predicted_class.value] += 1
+        
+        # Get document type name
+        class_name = result.document_type
+        
+        # Initialize count if not exists (dynamic document types)
+        if class_name not in self.classification_stats["class_counts"]:
+            self.classification_stats["class_counts"][class_name] = 0
+        
+        self.classification_stats["class_counts"][class_name] += 1
         
         # Update average confidence
         total = self.classification_stats["total_classified"]
@@ -225,7 +241,7 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         
         self.classification_stats["processing_times"].append(result.processing_time)
     
-    def _determine_overall_class(self, classification_results: List[Dict]) -> Optional[DocumentClass]:
+    def _determine_overall_class(self, classification_results: List[Dict]) -> Optional[str]:
         """Determine overall document class from page-level results."""
         if not classification_results:
             return None
@@ -238,17 +254,21 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         
         # For single page, return the result
         if len(valid_results) == 1:
-            return valid_results[0].predicted_class
+            result = valid_results[0]
+            # Return document_type directly as string
+            return result.document_type
         
         # For multiple pages, use majority vote weighted by confidence
         class_votes = {}
         for result in valid_results:
-            cls = result.predicted_class
+            doc_type = result.document_type
             weight = result.confidence
-            class_votes[cls] = class_votes.get(cls, 0) + weight
+            class_votes[doc_type] = class_votes.get(doc_type, 0) + weight
         
         # Return class with highest weighted vote
-        return max(class_votes.items(), key=lambda x: x[1])[0]
+        if class_votes:
+            return max(class_votes.items(), key=lambda x: x[1])[0]
+        return None
     
     def _calculate_overall_confidence(self, classification_results: List[Dict]) -> float:
         """Calculate overall confidence from page-level results."""
@@ -259,7 +279,7 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         
         return sum(r.confidence for r in valid_results) / len(valid_results)
     
-    def _aggregate_probabilities(self, classification_results: List[Dict]) -> Dict[DocumentClass, float]:
+    def _aggregate_probabilities(self, classification_results: List[Dict]) -> Dict[str, float]:
         """Aggregate probabilities from page-level results."""
         valid_results = [r["result"] for r in classification_results if "result" in r]
         
@@ -268,9 +288,16 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         
         # Average probabilities across pages
         aggregated_probs = {}
-        for cls in DocumentClass:
-            probs = [r.probabilities.get(cls, 0.0) for r in valid_results]
-            aggregated_probs[cls] = sum(probs) / len(probs)
+        
+        # Get all document types from the results
+        all_doc_types = set()
+        for result in valid_results:
+            all_doc_types.update(result.probabilities.keys())
+        
+        # Calculate average probabilities
+        for doc_type in all_doc_types:
+            probs = [r.probabilities.get(doc_type, 0.0) for r in valid_results]
+            aggregated_probs[doc_type] = sum(probs) / len(probs)
         
         return aggregated_probs
     
@@ -327,7 +354,7 @@ class ClassificationIntegratedListener(PreprocessingPDFListener):
         
         for sample in training_data:
             images.append(sample["image"])
-            labels.append(DocumentClass(sample["label"]))
+            labels.append(sample["label"])  # Use string label directly
             texts.append(sample.get("text", ""))
         
         try:
