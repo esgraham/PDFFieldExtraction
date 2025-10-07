@@ -5,7 +5,7 @@ FastAPI-based web application for displaying KPIs, analytics, and summaries.
 Includes real-time monitoring and interactive visualizations.
 """
 
-from fastapi import FastAPI, Request, HTTPException, Query, Depends
+from fastapi import FastAPI, Request, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,6 +16,7 @@ from typing import Optional, Dict, List, Any
 from pathlib import Path
 import logging
 from contextlib import asynccontextmanager
+import asyncio
 
 # Fix for SQLite datetime adapter deprecation in Python 3.12+
 def adapt_datetime_iso(val):
@@ -145,6 +146,71 @@ class DashboardDatabase:
         except Exception as e:
             logger.error(f"Error importing HITL data: {e}")
             return 0
+    
+    def refresh_dashboard_data(self):
+        """Refresh dashboard data from all available sources."""
+        refreshed_count = 0
+        
+        try:
+            # Import new HITL data
+            hitl_count = self.import_hitl_data()
+            refreshed_count += hitl_count
+            
+            # Check for new processing results from pipeline
+            # (Pipeline automatically saves to our database via data_persistence.py)
+            
+            logger.info(f"Dashboard data refresh completed. {refreshed_count} new records imported.")
+            return refreshed_count
+            
+        except Exception as e:
+            logger.error(f"Error refreshing dashboard data: {e}")
+            return 0
+    
+    def manually_reload_analytics_engine(self):
+        """Manually reload analytics engine with data from database."""
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=365)
+            
+            existing_metrics = self.get_metrics_for_period(start_date, end_date)
+            logger.info(f"Manual reload: Found {len(existing_metrics)} metrics in database")
+            
+            # Clear and reload analytics engine (reference to global analytics_engine)
+            from dashboard.dashboard_app import analytics_engine
+            analytics_engine.document_metrics.clear()
+            
+            loaded_count = 0
+            for metric_dict in existing_metrics:
+                try:
+                    doc_metric = DocumentMetrics(
+                        document_id=metric_dict['document_id'],
+                        document_type=DocumentType(metric_dict['document_type']),
+                        processing_status=ProcessingStatus(metric_dict['processing_status']),
+                        start_time=metric_dict['start_time'],
+                        end_time=metric_dict['end_time'],
+                        total_processing_time=metric_dict['total_processing_time'],
+                        field_count=metric_dict['field_count'],
+                        hitl_required=bool(metric_dict['hitl_required']),
+                        hitl_reason=metric_dict['hitl_reason'],
+                        exception_type=metric_dict['exception_type'],
+                        confidence_scores=json.loads(metric_dict['confidence_scores']) if metric_dict['confidence_scores'] else {},
+                        cost_breakdown=json.loads(metric_dict['cost_breakdown']) if metric_dict['cost_breakdown'] else {},
+                        ocr_time=metric_dict['total_processing_time'] * 0.4,
+                        extraction_time=metric_dict['total_processing_time'] * 0.3,
+                        validation_time=metric_dict['total_processing_time'] * 0.2,
+                        validation_errors=[]
+                    )
+                    analytics_engine.add_document_metric(doc_metric)
+                    loaded_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to load metric {metric_dict['document_id']}: {e}")
+            
+            logger.info(f"Manual reload complete: {loaded_count}/{len(existing_metrics)} metrics loaded into analytics engine")
+            return loaded_count
+            
+        except Exception as e:
+            logger.error(f"Error in manual analytics engine reload: {e}")
+            return 0
 
 # Global instances
 analytics_engine = AnalyticsEngine()
@@ -152,6 +218,20 @@ markdown_converter = JSONToMarkdownConverter()
 pii_service = PIIMaskingService()
 llm_service = LLMSummaryService()  # Initialize with API key if available
 dashboard_db = DashboardDatabase()
+
+# Background task for data refresh
+async def background_data_refresh():
+    """Background task to refresh dashboard data every 5 minutes."""
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+            logger.debug("Running background data refresh...")
+            refreshed_count = dashboard_db.refresh_dashboard_data()
+            if refreshed_count > 0:
+                logger.info(f"Background refresh: {refreshed_count} new records")
+        except Exception as e:
+            logger.error(f"Background data refresh error: {e}")
+            await asyncio.sleep(60)  # Wait 1 minute before retry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -163,6 +243,10 @@ async def lifespan(app: FastAPI):
     hitl_imported = dashboard_db.import_hitl_data()
     if hitl_imported > 0:
         logger.info(f"✅ Imported {hitl_imported} HITL tasks as document metrics")
+    
+    # Start background data refresh task
+    refresh_task = asyncio.create_task(background_data_refresh())
+    logger.info("✅ Started background data refresh task")
     
     # Load existing real data from database
     end_date = datetime.now()
@@ -196,12 +280,15 @@ async def lifespan(app: FastAPI):
             )
             analytics_engine.add_document_metric(doc_metric)
         
+        # Log analytics engine status
+        logger.info(f"📊 Analytics engine now has {len(analytics_engine.document_metrics)} metrics loaded")
+        
         if len(existing_metrics) == 0:
             logger.warning("⚠️  No real data found in production database")
             logger.info("📊 Dashboard will show empty metrics until real documents are processed")
             logger.info("💡 To add sample data for testing, run: python data/databases/setup_databases.py")
         else:
-            logger.info(f"✅ Loaded {len(existing_metrics)} real document processing metrics")
+            logger.info(f"✅ Loaded {len(existing_metrics)} real document processing metrics into analytics engine")
             
     except Exception as e:
         logger.error(f"Error loading existing data: {e}")
@@ -211,6 +298,8 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down dashboard application...")
+    refresh_task.cancel()
+    logger.info("✅ Cancelled background data refresh task")
 
 # Create FastAPI app
 app = FastAPI(
@@ -460,6 +549,50 @@ async def import_hitl_data():
         logger.error(f"Error importing HITL data: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error importing HITL data: {str(e)}")
 
+@app.post("/api/refresh-data")
+async def refresh_dashboard_data_endpoint():
+    """Manually refresh dashboard data from all sources."""
+    try:
+        refreshed_count = dashboard_db.refresh_dashboard_data()
+        
+        # Reload analytics engine with updated data
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365)
+        existing_metrics = dashboard_db.get_metrics_for_period(start_date, end_date)
+        
+        # Clear and reload analytics engine
+        analytics_engine.document_metrics.clear()
+        for metric_dict in existing_metrics:
+            doc_metric = DocumentMetrics(
+                document_id=metric_dict['document_id'],
+                document_type=DocumentType(metric_dict['document_type']),
+                processing_status=ProcessingStatus(metric_dict['processing_status']),
+                start_time=metric_dict['start_time'],
+                end_time=metric_dict['end_time'],
+                total_processing_time=metric_dict['total_processing_time'],
+                field_count=metric_dict['field_count'],
+                hitl_required=bool(metric_dict['hitl_required']),
+                hitl_reason=metric_dict['hitl_reason'],
+                exception_type=metric_dict['exception_type'],
+                confidence_scores=json.loads(metric_dict['confidence_scores']) if metric_dict['confidence_scores'] else {},
+                cost_breakdown=json.loads(metric_dict['cost_breakdown']) if metric_dict['cost_breakdown'] else {},
+                ocr_time=metric_dict['total_processing_time'] * 0.4,
+                extraction_time=metric_dict['total_processing_time'] * 0.3,
+                validation_time=metric_dict['total_processing_time'] * 0.2,
+                validation_errors=[]
+            )
+            analytics_engine.add_document_metric(doc_metric)
+        
+        return {
+            "success": True, 
+            "refreshed_count": refreshed_count,
+            "total_metrics": len(existing_metrics),
+            "message": f"Successfully refreshed {refreshed_count} new records from all data sources"
+        }
+    except Exception as e:
+        logger.error(f"Error refreshing dashboard data: {e}")
+        raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
+
 @app.get("/dashboard/executive", response_class=HTMLResponse)
 async def executive_dashboard(request: Request):
     """Executive dashboard view."""
@@ -486,6 +619,60 @@ async def technical_dashboard(request: Request):
         "title": "Technical Dashboard",
         "dashboard_type": "technical"
     })
+
+@app.get("/api/debug/analytics-status")
+async def get_analytics_status():
+    """Debug endpoint to check analytics engine and database status."""
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        database_metrics = dashboard_db.get_metrics_for_period(start_date, end_date)
+        
+        return {
+            "success": True,
+            "analytics_engine": {
+                "loaded_metrics": len(analytics_engine.document_metrics),
+                "loaded_field_metrics": len(analytics_engine.field_metrics)
+            },
+            "database": {
+                "available_metrics": len(database_metrics),
+                "database_path": str(dashboard_db.db_path),
+                "database_exists": dashboard_db.db_path.exists()
+            },
+            "sample_documents": [
+                {
+                    "id": doc.document_id,
+                    "type": doc.document_type.value,
+                    "status": doc.processing_status.value,
+                    "processing_time": doc.total_processing_time
+                }
+                for doc in analytics_engine.document_metrics[:3]
+            ]
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/api/debug/reload-analytics")
+async def reload_analytics_engine():
+    """Manually reload analytics engine with database data."""
+    try:
+        loaded_count = dashboard_db.manually_reload_analytics_engine()
+        
+        return {
+            "success": True,
+            "loaded_count": loaded_count,
+            "analytics_engine_metrics": len(analytics_engine.document_metrics),
+            "message": f"Successfully reloaded {loaded_count} metrics into analytics engine"
+        }
+    except Exception as e:
+        logger.error(f"Manual analytics reload failed: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn

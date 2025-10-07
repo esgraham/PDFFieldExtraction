@@ -88,3 +88,4 @@ Thumbs.db
 # Azure
 .azure/
 results/
+data/databases/*.db

@@ -19,6 +19,7 @@ from .document_classifier import DocumentClassifier
 from .azure_document_intelligence import AzureDocumentIntelligenceOCR
 from .field_extraction import DocumentTemplate, FieldExtractor
 from .validation_engine import ComprehensiveValidator
+from .data_persistence import save_processing_result
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,15 @@ class PDFProcessingPipeline:
             
             # Store in history
             self.results_history.append(result)
+            
+            # Save processing results to dashboard database for real-time monitoring
+            try:
+                if save_processing_result(result):
+                    logger.debug(f"📊 Saved processing metrics to dashboard database for {blob_name}")
+                else:
+                    logger.warning(f"⚠️ Failed to save processing metrics to dashboard database for {blob_name}")
+            except Exception as e:
+                logger.warning(f"⚠️ Dashboard persistence error for {blob_name}: {e}")
             
             logger.info(f"✅ Processing completed for {blob_name} in {result['processing_time']:.2f}s")
             return result

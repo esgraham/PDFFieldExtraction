@@ -44,7 +44,7 @@ class DocumentType(Enum):
 class ProcessingStatus(Enum):
     """Document processing status."""
     SUCCESS = "success"
-    HITL_REQUIRED = "hitl_required"
+    HITL_REQUIRED = "needs_review"
     FAILED = "failed"
     REPROCESSING = "reprocessing"
 
